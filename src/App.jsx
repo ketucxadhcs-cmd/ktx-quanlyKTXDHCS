@@ -3384,6 +3384,27 @@ function NotificationsTab({ perm, user }) {
   const remove = async (id) => setNotifications(notifications.filter((n) => n.id !== id));
   const removeAttachment = (idx) => setForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
 
+  // ===== Sửa thông báo (chỉ Quản trị / cán bộ) =====
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editWarn, setEditWarn] = useState("");
+  const startEdit = (n) => {
+    setShowForm(false);
+    setEditingId(n.id);
+    setEditForm({ scope: n.scope, scopeValue: n.scopeValue ?? "", title: n.title, content: n.content || "", attachments: n.attachments || [] });
+    setEditWarn("");
+  };
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditWarn(""); };
+  const removeEditAttachment = (idx) => setEditForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
+  const saveEdit = async () => {
+    if (!editForm.title.trim()) { setEditWarn("Vui lòng nhập tiêu đề thông báo."); return; }
+    if (editForm.scope !== "toan_ktx" && !String(editForm.scopeValue).trim()) { setEditWarn("Vui lòng chọn đối tượng nhận thông báo cụ thể."); return; }
+    await setNotifications(notifications.map((n) => (n.id === editingId
+      ? { ...n, scope: editForm.scope, scopeValue: editForm.scopeValue, title: editForm.title, content: editForm.content, attachments: editForm.attachments, editedBy: user, editedAt: new Date().toISOString() }
+      : n)));
+    cancelEdit();
+  };
+
   const scopeLabel = (n) => {
     const def = NOTIFICATION_SCOPES.find((s) => s.key === n.scope);
     if (n.scope === "toan_ktx") return def?.label || "Toàn ký túc xá";
@@ -3478,11 +3499,16 @@ function NotificationsTab({ perm, user }) {
                   {form.attachments.map((a, idx) => (
                     <div key={idx} className="relative flex items-center gap-1.5 pl-1.5 pr-1.5 py-1" style={{ border: `1px solid ${T.paperDark}`, background: T.paper }}>
                       {isImageAttachment(a) ? (
-                        <img src={a.url} alt={a.name || "Đính kèm"} className="w-10 h-10 object-cover stamp-border" />
+                        <a href={a.url} target="_blank" rel="noreferrer" title="Xem ảnh">
+                          <img src={a.url} alt={a.name || "Đính kèm"} className="w-10 h-10 object-cover stamp-border" />
+                        </a>
                       ) : (
                         <span className="w-10 h-10 flex items-center justify-center" style={{ color: T.green }}><Paperclip size={16} /></span>
                       )}
                       <span className="f-mono text-[10px] max-w-[100px] truncate" style={{ color: T.inkSoft }}>{a.name || "Tệp đính kèm"}</span>
+                      <button type="button" onClick={() => downloadFileFromUrl(a.url, a.name || `dinh-kem-${idx + 1}`)} title="Tải về">
+                        <Upload size={13} style={{ color: T.green, transform: "rotate(180deg)" }} />
+                      </button>
                       <button type="button" onClick={() => removeAttachment(idx)} title="Xoá đính kèm">
                         <X size={13} style={{ color: T.red }} />
                       </button>
@@ -3498,14 +3524,101 @@ function NotificationsTab({ perm, user }) {
 
       {loading ? <LoadingRow /> : sorted.length === 0 ? <EmptyState text="Chưa có thông báo nào." /> : (
         <div className="space-y-3">
-          {sorted.map((n) => (
+          {sorted.map((n) => {
+            if (perm.canManage && editingId === n.id) {
+              return (
+                <div key={n.id} className="stamp-border p-4 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
+                  <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
+                  <Field label="Phạm vi gửi" required>
+                    <select className={inputCls} style={inputStyle} value={editForm.scope} onChange={(e) => setEditForm({ ...editForm, scope: e.target.value, scopeValue: "" })}>
+                      {NOTIFICATION_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </Field>
+                  {editForm.scope === "toa_nha" && (
+                    <Field label="Chọn tòa nhà" required>
+                      <select className={inputCls} style={inputStyle} value={editForm.scopeValue} onChange={(e) => setEditForm({ ...editForm, scopeValue: e.target.value })}>
+                        <option value="">— Chọn —</option>
+                        {buildings.map((b) => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                  {editForm.scope === "tang" && (
+                    <Field label="Chọn tầng / khu vực" required>
+                      <select className={inputCls} style={inputStyle} value={editForm.scopeValue} onChange={(e) => setEditForm({ ...editForm, scopeValue: e.target.value })}>
+                        <option value="">— Chọn —</option>
+                        {areas.map((a) => <option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                  {editForm.scope === "phong" && (
+                    <Field label="Chọn phòng" required>
+                      <select className={inputCls} style={inputStyle} value={editForm.scopeValue} onChange={(e) => setEditForm({ ...editForm, scopeValue: e.target.value })}>
+                        <option value="">— Chọn —</option>
+                        {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                  {editForm.scope === "khoa" && (
+                    <Field label="Chọn khoá học" required>
+                      <select className={inputCls} style={inputStyle} value={editForm.scopeValue} onChange={(e) => setEditForm({ ...editForm, scopeValue: e.target.value })}>
+                        <option value="">— Chọn —</option>
+                        {khoaList.map((k) => <option key={k} value={k}>{k}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                  <div className="md:col-span-2">
+                    <Field label="Tiêu đề" required><input className={inputCls} style={inputStyle} value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} /></Field>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Field label="Nội dung"><textarea rows={3} className={inputCls} style={inputStyle} value={editForm.content} onChange={(e) => setEditForm({ ...editForm, content: e.target.value })} /></Field>
+                  </div>
+                  <div className="md:col-span-2">
+                    <Field label="Hình ảnh / tệp đính kèm">
+                      <UploadField multiple onUploaded={(url, name, type) => setEditForm((f) => ({ ...f, attachments: [...(f.attachments || []), { url, name, type }] }))} />
+                      {editForm.attachments?.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {editForm.attachments.map((a, idx) => (
+                            <div key={idx} className="relative flex items-center gap-1.5 pl-1.5 pr-1.5 py-1" style={{ border: `1px solid ${T.paperDark}`, background: T.paper }}>
+                              {isImageAttachment(a) ? (
+                                <a href={a.url} target="_blank" rel="noreferrer" title="Xem ảnh">
+                                  <img src={a.url} alt={a.name || "Đính kèm"} className="w-10 h-10 object-cover stamp-border" />
+                                </a>
+                              ) : (
+                                <span className="w-10 h-10 flex items-center justify-center" style={{ color: T.green }}><Paperclip size={16} /></span>
+                              )}
+                              <span className="f-mono text-[10px] max-w-[100px] truncate" style={{ color: T.inkSoft }}>{a.name || "Tệp đính kèm"}</span>
+                              <button type="button" onClick={() => downloadFileFromUrl(a.url, a.name || `dinh-kem-${idx + 1}`)} title="Tải về">
+                                <Upload size={13} style={{ color: T.green, transform: "rotate(180deg)" }} />
+                              </button>
+                              <button type="button" onClick={() => removeEditAttachment(idx)} title="Xoá đính kèm">
+                                <X size={13} style={{ color: T.red }} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Field>
+                  </div>
+                  <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
+                </div>
+              );
+            }
+            return (
             <div key={n.id} className="stamp-border p-3" style={{ background: "#fff" }}>
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div>
                   <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{n.title}</div>
-                  <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{scopeLabel(n)} · {formatDateTime(n.createdAt)} · {n.by}</div>
+                  <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
+                    {scopeLabel(n)} · {formatDateTime(n.createdAt)} · {n.by}
+                    {n.editedAt && <span className="italic"> · đã sửa {formatDateTime(n.editedAt)}</span>}
+                  </div>
                 </div>
-                {perm.canManage && <button onClick={() => remove(n.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+                {perm.canManage && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => startEdit(n)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                    <button onClick={() => remove(n.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                  </div>
+                )}
               </div>
               {n.content && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{n.content}</div>}
               {n.attachments?.length > 0 && (
@@ -3544,7 +3657,8 @@ function NotificationsTab({ perm, user }) {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
