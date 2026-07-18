@@ -1274,10 +1274,197 @@ function RoomForm({ initial, onCancel, onSave, warn }) {
   );
 }
 
+/* ============ NHẬP DANH SÁCH PHÒNG TỪ EXCEL/CSV ============ */
+function guessRoomField(header) {
+  const h = String(header || "").toLowerCase();
+  if (/toà\s*nhà|tòa\s*nhà|^nhà$|building/.test(h)) return "building";
+  if (/tầng|khu\s*vực|area|floor/.test(h)) return "area";
+  if (/số\s*phòng|^phòng$|room/.test(h)) return "roomNumber";
+  if (/sức\s*chứa|số\s*giường|capacity/.test(h)) return "capacity";
+  if (/giới\s*tính|gender/.test(h)) return "gender";
+  if (/trạng\s*thái|status/.test(h)) return "status";
+  if (/ghi\s*chú|note/.test(h)) return "note";
+  return "";
+}
+const ROOM_IMPORT_FIELDS = [
+  { key: "", label: "— Bỏ qua cột này —" },
+  { key: "building", label: "Toà nhà" },
+  { key: "area", label: "Tầng / khu vực" },
+  { key: "roomNumber", label: "Số phòng" },
+  { key: "capacity", label: "Sức chứa" },
+  { key: "gender", label: "Giới tính phòng" },
+  { key: "status", label: "Trạng thái" },
+  { key: "note", label: "Ghi chú" },
+];
+
+function RoomImportPanel({ existingItems, onConfirm, onClose }) {
+  const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState([]);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [colMap, setColMap] = useState([]);
+  const [fileErr, setFileErr] = useState("");
+  const [fileBusy, setFileBusy] = useState(false);
+  const [selectedRows, setSelectedRows] = useState({});
+
+  const handleFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setFileErr(""); setFileBusy(true);
+    try {
+      const isCsv = /\.csv$/i.test(file.name);
+      let rows = [];
+      if (isCsv) {
+        rows = parseCSVText(await file.text());
+      } else {
+        const XLSX = await loadXLSXLib();
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" })
+          .map((r) => r.map((c) => String(c ?? "")))
+          .filter((r) => r.some((c) => String(c).trim() !== ""));
+      }
+      if (rows.length === 0) { setFileErr("Không đọc được dữ liệu nào từ file này."); setFileBusy(false); return; }
+      const colCount = Math.max(...rows.map((r) => r.length));
+      const headerRow = rows[0] || [];
+      setColMap(Array.from({ length: colCount }, (_, i) => guessRoomField(headerRow[i])));
+      setRawRows(rows);
+      setFileName(file.name);
+      setSelectedRows({});
+    } catch (err) {
+      setFileErr(`Đọc file thất bại — ${err?.message || err}`);
+    }
+    setFileBusy(false);
+  };
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const previewRows = dataRows.map((r) => {
+    const o = { building: "", area: "", roomNumber: "", capacity: "", gender: "", status: "", note: "" };
+    colMap.forEach((key, i) => { if (key && r[i] !== undefined) o[key] = String(r[i]).trim(); });
+    if (o.gender) o.gender = normalizeGenderInput(o.gender);
+    if (!ROOM_STATUS.includes(o.status)) o.status = "Trống";
+    return o;
+  });
+
+  const existingSet = new Set(existingItems.map((r) => normalizeName(`${r.building}|${r.roomNumber}`)));
+  const isDup = (r) => r.building && r.roomNumber && existingSet.has(normalizeName(`${r.building}|${r.roomNumber}`));
+
+  useEffect(() => {
+    const next = {};
+    previewRows.forEach((r, i) => { next[i] = Boolean(r.building && r.roomNumber) && !isDup(r); });
+    setSelectedRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewRows.length]);
+
+  const toggleRow = (i) => setSelectedRows((s) => ({ ...s, [i]: !s[i] }));
+  const checkedCount = Object.values(selectedRows).filter(Boolean).length;
+
+  const confirmImport = () => {
+    const chosen = previewRows.filter((r, i) => selectedRows[i] && r.building && r.roomNumber);
+    if (chosen.length === 0) return;
+    onConfirm(chosen.map((r, idx) => ({
+      id: Date.now() + idx,
+      building: r.building,
+      area: r.area || "",
+      roomNumber: r.roomNumber,
+      capacity: r.capacity || "4",
+      gender: r.gender || "Nam",
+      status: r.status || "Trống",
+      note: r.note || "",
+    })));
+  };
+
+  return (
+    <div className="stamp-border p-3 mb-3" style={{ background: "#fff" }}>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <span className="f-display text-[11.5px] uppercase tracking-wider" style={{ color: T.amberDark }}>Nhập danh sách phòng từ Excel/CSV</span>
+        <button onClick={onClose} title="Đóng"><X size={16} style={{ color: T.inkSoft }} /></button>
+      </div>
+      <p className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>
+        Chọn file Excel (.xlsx/.xls) hoặc CSV — đọc trực tiếp trong trình duyệt. Sau khi đọc xong, chọn cột nào ứng với thông tin nào rồi tick dòng cần lấy.
+      </p>
+      <label className="f-display text-[11px] uppercase tracking-wider px-3 py-1.5 inline-flex items-center gap-1.5 cursor-pointer btn-press" style={{ border: `1px solid ${T.green}`, color: T.green }}>
+        {fileBusy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+        {fileBusy ? "Đang đọc file…" : "Chọn file từ máy"}
+        <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFilePicked} />
+      </label>
+      {fileName && <span className="f-body text-[11px] ml-2" style={{ color: T.inkSoft }}>Đã chọn: {fileName}</span>}
+      {fileErr && <div className="f-body text-xs mt-2" style={{ color: T.red }}>{fileErr}</div>}
+
+      {rawRows.length > 0 && (
+        <>
+          <label className="flex items-center gap-2 mt-3 f-body text-xs cursor-pointer" style={{ color: T.ink }}>
+            <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
+            Dòng đầu tiên là tiêu đề cột (không lấy làm dữ liệu)
+          </label>
+          <div className="f-mono text-[10.5px] uppercase tracking-widest mt-3 mb-1" style={{ color: T.amberDark }}>Chọn cột nào ứng với thông tin nào</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
+            {colMap.map((val, i) => (
+              <div key={i}>
+                <div className="f-body text-[10px] truncate mb-0.5" style={{ color: T.inkSoft }} title={rawRows[0]?.[i]}>
+                  Cột {i + 1}{hasHeader && rawRows[0]?.[i] ? `: "${rawRows[0][i]}"` : ""}
+                </div>
+                <select className={inputCls} style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px" }} value={val} onChange={(e) => setColMap((cm) => cm.map((v, ci) => (ci === i ? e.target.value : v)))}>
+                  {ROOM_IMPORT_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {previewRows.length > 0 && (
+        <>
+          <div className="flex items-center justify-between flex-wrap gap-2 mt-4 mb-1.5">
+            <span className="f-mono text-[11px] uppercase tracking-widest" style={{ color: T.amberDark }}>Xem trước — tick chọn dòng cần lấy ({checkedCount}/{previewRows.length})</span>
+          </div>
+          <div className="overflow-x-auto overflow-y-auto stamp-border" style={{ background: "#fff", maxHeight: 320 }}>
+            <table className="w-full text-xs f-body table-lines table-grid">
+              <thead>
+                <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                  <th className="px-2 py-1.5 w-8"></th>
+                  <th className="text-left px-2 py-1.5">Toà nhà</th>
+                  <th className="text-left px-2 py-1.5">Tầng/Khu vực</th>
+                  <th className="text-left px-2 py-1.5">Số phòng</th>
+                  <th className="text-left px-2 py-1.5">Sức chứa</th>
+                  <th className="text-left px-2 py-1.5">Giới tính</th>
+                  <th className="text-left px-2 py-1.5">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.map((r, i) => (
+                  <tr key={i} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={Boolean(selectedRows[i])} onChange={() => toggleRow(i)} /></td>
+                    <td className="px-2 py-1.5 font-medium">
+                      {r.building || <span className="italic" style={{ color: T.inkSoft }}>(thiếu — sẽ bị bỏ qua)</span>}
+                      {isDup(r) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.red }}>· Trùng đã có</span>}
+                    </td>
+                    <td className="px-2 py-1.5">{r.area || "—"}</td>
+                    <td className="px-2 py-1.5 f-mono">{r.roomNumber || "—"}</td>
+                    <td className="px-2 py-1.5 f-mono">{r.capacity || "—"}</td>
+                    <td className="px-2 py-1.5">{r.gender || "—"}</td>
+                    <td className="px-2 py-1.5">{r.status || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <Btn onClick={confirmImport} disabled={checkedCount === 0}><CheckCircle2 size={14} /> Xác nhận, thêm {checkedCount} phòng</Btn>
+            <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function RoomsTab({ perm }) {
   const { items: rooms, setItems: setRooms, loading } = useSharedList("rooms");
   const { items: students, setItems: setStudents } = useSharedList("students");
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [warn, setWarn] = useState("");
   const [filterBuilding, setFilterBuilding] = useState("");
@@ -1359,8 +1546,22 @@ function RoomsTab({ perm }) {
     <div>
       <SectionHeader compact icon={Building2} eyebrow={`Tổng số phòng: ${rooms.length}`} title="Danh sách phòng"
         action={perm.canManage && (
-          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm phòng</Btn>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Btn size="sm" variant="outline" onClick={() => setShowImport((s) => !s)}><Upload size={14} /> Nhập từ Excel/CSV</Btn>
+            <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm phòng</Btn>
+          </div>
         )} />
+
+      {perm.canManage && showImport && (
+        <RoomImportPanel
+          existingItems={rooms}
+          onClose={() => setShowImport(false)}
+          onConfirm={async (newRooms) => {
+            await setRooms([...rooms, ...newRooms]);
+            setShowImport(false);
+          }}
+        />
+      )}
 
       {perm.canManage && showForm && (
         <RoomForm initial={blankForm} warn={warn} onCancel={() => setShowForm(false)} onSave={addRoom} />
@@ -2039,12 +2240,195 @@ function RosterTab({ perm }) {
 /* ============================================================
    TAB: TÀI SẢN & THIẾT BỊ TRONG PHÒNG (điện, nước, cơ sở vật chất)
    ============================================================ */
+/* ============ NHẬP DANH SÁCH TÀI SẢN TỪ EXCEL/CSV ============ */
+function guessAssetField(header) {
+  const h = String(header || "").toLowerCase();
+  if (/số\s*phòng|^phòng$|room/.test(h)) return "roomNumber";
+  if (/tên|thiết\s*bị|tài\s*sản|name/.test(h)) return "name";
+  if (/phân\s*loại|loại|category/.test(h)) return "category";
+  if (/số\s*lượng|sl|quantity/.test(h)) return "quantity";
+  if (/tình\s*trạng|trạng\s*thái|status/.test(h)) return "status";
+  if (/ghi\s*chú|note/.test(h)) return "note";
+  return "";
+}
+const ASSET_IMPORT_FIELDS = [
+  { key: "", label: "— Bỏ qua cột này —" },
+  { key: "roomNumber", label: "Số phòng (để khớp phòng)" },
+  { key: "name", label: "Tên thiết bị / tài sản" },
+  { key: "category", label: "Phân loại" },
+  { key: "quantity", label: "Số lượng" },
+  { key: "status", label: "Tình trạng" },
+  { key: "note", label: "Ghi chú" },
+];
+
+function AssetImportPanel({ rooms, user, onConfirm, onClose }) {
+  const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState([]);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [colMap, setColMap] = useState([]);
+  const [fileErr, setFileErr] = useState("");
+  const [fileBusy, setFileBusy] = useState(false);
+  const [selectedRows, setSelectedRows] = useState({});
+
+  const handleFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setFileErr(""); setFileBusy(true);
+    try {
+      const isCsv = /\.csv$/i.test(file.name);
+      let rows = [];
+      if (isCsv) {
+        rows = parseCSVText(await file.text());
+      } else {
+        const XLSX = await loadXLSXLib();
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" })
+          .map((r) => r.map((c) => String(c ?? "")))
+          .filter((r) => r.some((c) => String(c).trim() !== ""));
+      }
+      if (rows.length === 0) { setFileErr("Không đọc được dữ liệu nào từ file này."); setFileBusy(false); return; }
+      const colCount = Math.max(...rows.map((r) => r.length));
+      const headerRow = rows[0] || [];
+      setColMap(Array.from({ length: colCount }, (_, i) => guessAssetField(headerRow[i])));
+      setRawRows(rows);
+      setFileName(file.name);
+      setSelectedRows({});
+    } catch (err) {
+      setFileErr(`Đọc file thất bại — ${err?.message || err}`);
+    }
+    setFileBusy(false);
+  };
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const previewRows = dataRows.map((r) => {
+    const o = { roomNumber: "", name: "", category: "", quantity: "", status: "", note: "" };
+    colMap.forEach((key, i) => { if (key && r[i] !== undefined) o[key] = String(r[i]).trim(); });
+    if (!ASSET_CATEGORY.includes(o.category)) o.category = "Cơ sở vật chất";
+    if (!ASSET_STATUS.includes(o.status)) o.status = "Tốt";
+    const matched = rooms.find((rm) => normalizeName(rm.roomNumber) === normalizeName(o.roomNumber));
+    return { ...o, matchedRoomId: matched ? matched.id : null, matchedRoomLabel: matched ? roomLabel(matched) : null };
+  });
+
+  useEffect(() => {
+    const next = {};
+    previewRows.forEach((r, i) => { next[i] = Boolean(r.name && r.matchedRoomId); });
+    setSelectedRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewRows.length]);
+
+  const toggleRow = (i) => setSelectedRows((s) => ({ ...s, [i]: !s[i] }));
+  const checkedCount = Object.values(selectedRows).filter(Boolean).length;
+
+  const confirmImport = () => {
+    const chosen = previewRows.filter((r, i) => selectedRows[i] && r.name && r.matchedRoomId);
+    if (chosen.length === 0) return;
+    onConfirm(chosen.map((r, idx) => ({
+      id: Date.now() + idx,
+      roomId: r.matchedRoomId,
+      name: r.name,
+      category: r.category || "Cơ sở vật chất",
+      quantity: r.quantity || "1",
+      status: r.status || "Tốt",
+      note: r.note || "",
+      updatedAt: new Date().toISOString(),
+      by: user,
+    })));
+  };
+
+  return (
+    <div className="stamp-border p-3 mb-3" style={{ background: "#fff" }}>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <span className="f-display text-[11.5px] uppercase tracking-wider" style={{ color: T.amberDark }}>Nhập danh sách tài sản từ Excel/CSV</span>
+        <button onClick={onClose} title="Đóng"><X size={16} style={{ color: T.inkSoft }} /></button>
+      </div>
+      <p className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>
+        File cần có cột "Số phòng" đúng với số phòng đã có trong hệ thống để khớp tài sản vào đúng phòng — dòng không khớp được phòng nào sẽ không thể chọn.
+      </p>
+      <label className="f-display text-[11px] uppercase tracking-wider px-3 py-1.5 inline-flex items-center gap-1.5 cursor-pointer btn-press" style={{ border: `1px solid ${T.green}`, color: T.green }}>
+        {fileBusy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+        {fileBusy ? "Đang đọc file…" : "Chọn file từ máy"}
+        <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFilePicked} />
+      </label>
+      {fileName && <span className="f-body text-[11px] ml-2" style={{ color: T.inkSoft }}>Đã chọn: {fileName}</span>}
+      {fileErr && <div className="f-body text-xs mt-2" style={{ color: T.red }}>{fileErr}</div>}
+
+      {rawRows.length > 0 && (
+        <>
+          <label className="flex items-center gap-2 mt-3 f-body text-xs cursor-pointer" style={{ color: T.ink }}>
+            <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
+            Dòng đầu tiên là tiêu đề cột (không lấy làm dữ liệu)
+          </label>
+          <div className="f-mono text-[10.5px] uppercase tracking-widest mt-3 mb-1" style={{ color: T.amberDark }}>Chọn cột nào ứng với thông tin nào</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
+            {colMap.map((val, i) => (
+              <div key={i}>
+                <div className="f-body text-[10px] truncate mb-0.5" style={{ color: T.inkSoft }} title={rawRows[0]?.[i]}>
+                  Cột {i + 1}{hasHeader && rawRows[0]?.[i] ? `: "${rawRows[0][i]}"` : ""}
+                </div>
+                <select className={inputCls} style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px" }} value={val} onChange={(e) => setColMap((cm) => cm.map((v, ci) => (ci === i ? e.target.value : v)))}>
+                  {ASSET_IMPORT_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {previewRows.length > 0 && (
+        <>
+          <div className="flex items-center justify-between flex-wrap gap-2 mt-4 mb-1.5">
+            <span className="f-mono text-[11px] uppercase tracking-widest" style={{ color: T.amberDark }}>Xem trước — tick chọn dòng cần lấy ({checkedCount}/{previewRows.length})</span>
+          </div>
+          <div className="overflow-x-auto overflow-y-auto stamp-border" style={{ background: "#fff", maxHeight: 320 }}>
+            <table className="w-full text-xs f-body table-lines table-grid">
+              <thead>
+                <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                  <th className="px-2 py-1.5 w-8"></th>
+                  <th className="text-left px-2 py-1.5">Số phòng (khớp)</th>
+                  <th className="text-left px-2 py-1.5 min-w-[110px]">Tên thiết bị</th>
+                  <th className="text-left px-2 py-1.5">Phân loại</th>
+                  <th className="text-left px-2 py-1.5">SL</th>
+                  <th className="text-left px-2 py-1.5">Tình trạng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.map((r, i) => (
+                  <tr key={i} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-2 py-1.5 text-center">
+                      <input type="checkbox" checked={Boolean(selectedRows[i])} disabled={!r.matchedRoomId} onChange={() => toggleRow(i)} />
+                    </td>
+                    <td className="px-2 py-1.5 f-mono">
+                      {r.matchedRoomLabel || <span className="italic" style={{ color: T.red }}>Không khớp phòng "{r.roomNumber || "?"}"</span>}
+                    </td>
+                    <td className="px-2 py-1.5 font-medium">{r.name || <span className="italic" style={{ color: T.inkSoft }}>(thiếu tên)</span>}</td>
+                    <td className="px-2 py-1.5">{r.category}</td>
+                    <td className="px-2 py-1.5 f-mono">{r.quantity || 1}</td>
+                    <td className="px-2 py-1.5">{r.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <Btn onClick={confirmImport} disabled={checkedCount === 0}><CheckCircle2 size={14} /> Xác nhận, thêm {checkedCount} tài sản</Btn>
+            <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 const ASSET_BLANK = { roomId: "", name: "", category: "Cơ sở vật chất", quantity: "1", status: "Tốt", note: "", imageUrl: "" };
 
 function AssetsTab({ perm, user }) {
   const { items: assets, setItems: setAssets, loading } = useSharedList("assets");
   const { items: rooms } = useSharedList("rooms");
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [form, setForm] = useState(ASSET_BLANK);
   const [warn, setWarn] = useState("");
   const [filterRoom, setFilterRoom] = useState("");
@@ -2080,11 +2464,26 @@ function AssetsTab({ perm, user }) {
     <div>
       <SectionHeader compact icon={Boxes} eyebrow={`Tổng số mục: ${assets.length}`} title="Tài sản & thiết bị trong phòng"
         action={perm.canMaintain && (
-          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm tài sản</Btn>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Btn size="sm" variant="outline" onClick={() => setShowImport((s) => !s)}><Upload size={14} /> Nhập từ Excel/CSV</Btn>
+            <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm tài sản</Btn>
+          </div>
         )} />
       <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
         Ghi nhận tài sản/thiết bị theo từng phòng: hệ thống điện - nước, quạt, giường tủ, bàn ghế và các cơ sở vật chất khác.
       </p>
+
+      {perm.canMaintain && showImport && (
+        <AssetImportPanel
+          rooms={rooms}
+          user={user}
+          onClose={() => setShowImport(false)}
+          onConfirm={async (newAssets) => {
+            await setAssets([...assets, ...newAssets]);
+            setShowImport(false);
+          }}
+        />
+      )}
 
       {perm.canMaintain && showForm && (
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
