@@ -502,18 +502,31 @@ function EmptyState({ text }) {
   return <div className="f-body text-sm italic py-8 text-center" style={{ color: T.inkSoft }}>{text}</div>;
 }
 
-/* ============ UPLOAD FIELD (tải ảnh/tệp trực tiếp từ máy — dùng Cloudinary) ============ */
-function UploadField({ onUploaded }) {
+/* ============ UPLOAD FIELD (tải ảnh/tệp trực tiếp từ máy — dùng Cloudinary) ============
+   onUploaded(url, originalFileName, mimeType) được gọi 1 lần cho mỗi tệp tải lên thành công.
+   Truyền multiple={true} để cho phép chọn/tải lên nhiều ảnh/tệp cùng lúc (vd: Thông báo). */
+function UploadField({ onUploaded, multiple = false, label }) {
   const [status, setStatus] = useState("idle"); // idle | uploading | done | error
   const [errMsg, setErrMsg] = useState("");
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
   const configured = Boolean(cloudName && uploadPreset);
 
+  const uploadOne = async (file) => {
+    const resourceType = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "raw";
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("upload_preset", uploadPreset);
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, { method: "POST", body: fd });
+    const data = await res.json();
+    if (!data.secure_url) throw new Error(data?.error?.message || "Không rõ nguyên nhân, thử lại.");
+    return data.secure_url;
+  };
+
   const handleFile = async (e) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
+    if (!files.length) return;
     if (!configured) {
       setStatus("error");
       setErrMsg("Chưa cấu hình Cloudinary (xem README).");
@@ -521,19 +534,11 @@ function UploadField({ onUploaded }) {
     }
     setStatus("uploading");
     try {
-      const resourceType = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "raw";
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("upload_preset", uploadPreset);
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, { method: "POST", body: fd });
-      const data = await res.json();
-      if (data.secure_url) {
-        onUploaded(data.secure_url);
-        setStatus("done");
-      } else {
-        setStatus("error");
-        setErrMsg(data?.error?.message || "Không rõ nguyên nhân, thử lại.");
+      for (const file of files) {
+        const url = await uploadOne(file);
+        onUploaded(url, file.name, file.type);
       }
+      setStatus("done");
     } catch (err) {
       setStatus("error");
       setErrMsg(String(err?.message || err));
@@ -547,10 +552,11 @@ function UploadField({ onUploaded }) {
         style={{ border: `1px solid ${T.green}`, color: T.green }}
       >
         {status === "uploading" ? <Loader2 size={12} className="animate-spin" /> : <Paperclip size={12} />}
-        {status === "uploading" ? "Đang tải lên…" : "Tải ảnh / tệp từ máy"}
+        {status === "uploading" ? "Đang tải lên…" : (label || (multiple ? "Tải ảnh / tệp từ máy (chọn được nhiều)" : "Tải ảnh / tệp từ máy"))}
         <input
           type="file"
           accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+          multiple={multiple}
           className="hidden"
           onChange={handleFile}
           disabled={status === "uploading"}
@@ -566,6 +572,13 @@ function UploadField({ onUploaded }) {
       )}
     </div>
   );
+}
+
+// Nhận biết đính kèm là hình ảnh hay tệp khác, để hiển thị xem trước ảnh hay biểu tượng tệp.
+function isImageAttachment(a) {
+  if (!a) return false;
+  if (a.type) return a.type.startsWith("image/");
+  return /\/image\/upload\//.test(a.url || "") || /\.(jpe?g|png|gif|webp|bmp|svg)(\?|$)/i.test(a.url || "");
 }
 
 /* ============ LOGIN GATE ============ */
@@ -3349,7 +3362,7 @@ function NotificationsTab({ perm, user }) {
   const { items: rooms } = useSharedList("rooms");
   const { items: students } = useSharedList("students");
   const [showForm, setShowForm] = useState(false);
-  const blank = { scope: "toan_ktx", scopeValue: "", title: "", content: "" };
+  const blank = { scope: "toan_ktx", scopeValue: "", title: "", content: "", attachments: [] };
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
 
@@ -3362,13 +3375,14 @@ function NotificationsTab({ perm, user }) {
     if (form.scope !== "toan_ktx" && !String(form.scopeValue).trim()) { setWarn("Vui lòng chọn đối tượng nhận thông báo cụ thể."); return; }
     setWarn("");
     await setNotifications([
-      { id: Date.now(), scope: form.scope, scopeValue: form.scopeValue, title: form.title, content: form.content, createdAt: new Date().toISOString(), by: user },
+      { id: Date.now(), scope: form.scope, scopeValue: form.scopeValue, title: form.title, content: form.content, attachments: form.attachments, createdAt: new Date().toISOString(), by: user },
       ...notifications,
     ]);
     setForm(blank);
     setShowForm(false);
   };
   const remove = async (id) => setNotifications(notifications.filter((n) => n.id !== id));
+  const removeAttachment = (idx) => setForm((f) => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }));
 
   const scopeLabel = (n) => {
     const def = NOTIFICATION_SCOPES.find((s) => s.key === n.scope);
@@ -3377,7 +3391,25 @@ function NotificationsTab({ perm, user }) {
     return `${def?.label} · ${n.scopeValue}`;
   };
 
-  const sorted = [...notifications].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  // Xác định hồ sơ sinh viên khớp với người đang đăng nhập (so tên, không phân biệt hoa/thường, khoảng trắng)
+  // để biết phòng/tòa nhà/tầng/khoá của họ — dùng cho việc lọc "nơi nào chỉ nơi đó thấy".
+  const myStudent = students.find((s) => perm.isOwner(s.name));
+  const myRoom = myStudent ? rooms.find((r) => r.id === myStudent.roomId) : null;
+
+  const matchesScope = (n) => {
+    if (n.scope === "toan_ktx") return true;
+    if (!myStudent) return false; // Không xác định được hồ sơ của người dùng thì không hiện thông báo thu hẹp phạm vi
+    if (n.scope === "toa_nha") return myRoom && String(myRoom.building) === String(n.scopeValue);
+    if (n.scope === "tang") return myRoom && String(myRoom.area) === String(n.scopeValue);
+    if (n.scope === "phong") return myStudent.roomId != null && String(myStudent.roomId) === String(n.scopeValue);
+    if (n.scope === "khoa") return String(myStudent.khoa || "") === String(n.scopeValue);
+    return true;
+  };
+
+  // Quản trị / cán bộ (canManage) xem toàn bộ thông báo để theo dõi & quản lý.
+  // Các vai trò khác chỉ thấy thông báo "Toàn ký túc xá" hoặc đúng phòng/tòa nhà/tầng/khoá của mình.
+  const visible = perm.canManage ? notifications : notifications.filter(matchesScope);
+  const sorted = [...visible].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
   return (
     <div>
@@ -3387,6 +3419,9 @@ function NotificationsTab({ perm, user }) {
         )} />
       <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
         Gửi thông báo tới toàn ký túc xá, hoặc thu hẹp theo tòa nhà, tầng/khu vực, phòng cụ thể, hoặc theo khoá học.
+        {!perm.canManage && !myStudent && (
+          <span> — Tên đăng nhập của bạn chưa khớp với hồ sơ Sinh viên nội trú nên chỉ hiện được thông báo "Toàn ký túc xá"; đăng nhập đúng họ tên trong danh sách sinh viên để xem đủ thông báo theo phòng/tòa nhà/khoá của bạn.</span>
+        )}
       </p>
 
       {perm.canManage && showForm && (
@@ -3435,6 +3470,28 @@ function NotificationsTab({ perm, user }) {
           <div className="md:col-span-2">
             <Field label="Nội dung"><textarea rows={3} className={inputCls} style={inputStyle} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} /></Field>
           </div>
+          <div className="md:col-span-2">
+            <Field label="Hình ảnh / tệp đính kèm">
+              <UploadField multiple onUploaded={(url, name, type) => setForm((f) => ({ ...f, attachments: [...(f.attachments || []), { url, name, type }] }))} />
+              {form.attachments?.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {form.attachments.map((a, idx) => (
+                    <div key={idx} className="relative flex items-center gap-1.5 pl-1.5 pr-1.5 py-1" style={{ border: `1px solid ${T.paperDark}`, background: T.paper }}>
+                      {isImageAttachment(a) ? (
+                        <img src={a.url} alt={a.name || "Đính kèm"} className="w-10 h-10 object-cover stamp-border" />
+                      ) : (
+                        <span className="w-10 h-10 flex items-center justify-center" style={{ color: T.green }}><Paperclip size={16} /></span>
+                      )}
+                      <span className="f-mono text-[10px] max-w-[100px] truncate" style={{ color: T.inkSoft }}>{a.name || "Tệp đính kèm"}</span>
+                      <button type="button" onClick={() => removeAttachment(idx)} title="Xoá đính kèm">
+                        <X size={13} style={{ color: T.red }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Field>
+          </div>
           <div className="md:col-span-2"><Btn onClick={submit}>Gửi thông báo</Btn></div>
         </div>
       )}
@@ -3451,6 +3508,41 @@ function NotificationsTab({ perm, user }) {
                 {perm.canManage && <button onClick={() => remove(n.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
               </div>
               {n.content && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{n.content}</div>}
+              {n.attachments?.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2.5">
+                  {n.attachments.map((a, idx) => (
+                    isImageAttachment(a) ? (
+                      <div key={idx} className="relative group">
+                        <a href={a.url} target="_blank" rel="noreferrer" title={a.name || "Xem ảnh"}>
+                          <img src={a.url} alt={a.name || `Hình ảnh ${idx + 1}`} className="w-20 h-20 object-cover stamp-border" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => downloadFileFromUrl(a.url, a.name || `hinh-anh-${idx + 1}.jpg`)}
+                          title="Tải ảnh về máy"
+                          className="absolute bottom-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-sm f-mono text-[9.5px] btn-press"
+                          style={{ background: "rgba(31,51,40,0.85)", color: "#fff", border: "none" }}
+                        >
+                          <Upload size={10} style={{ transform: "rotate(180deg)" }} /> Tải về
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => downloadFileFromUrl(a.url, a.name || `tep-dinh-kem-${idx + 1}`)}
+                        title="Tải tệp về máy"
+                        className="flex items-center gap-1.5 px-2.5 py-2 btn-press"
+                        style={{ border: `1px solid ${T.paperDark}`, background: T.paper }}
+                      >
+                        <Paperclip size={13} style={{ color: T.green }} />
+                        <span className="f-mono text-[10.5px] max-w-[150px] truncate" style={{ color: T.ink }}>{a.name || "Tệp đính kèm"}</span>
+                        <Upload size={11} style={{ color: T.inkSoft, transform: "rotate(180deg)" }} />
+                      </button>
+                    )
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
