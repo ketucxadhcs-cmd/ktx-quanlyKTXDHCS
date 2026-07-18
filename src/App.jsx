@@ -1967,17 +1967,25 @@ function RoomsTab({ perm }) {
                                                 return (
                                                   <div
                                                     key={bedNo}
-                                                    className="f-body text-[10.5px] px-1.5 py-1 rounded-sm flex items-center gap-1.5"
+                                                    onClick={() => occByBed && setViewStudentId(occByBed.id)}
+                                                    title={occByBed ? `${occByBed.name}${occByBed.msv ? ` — ${occByBed.msv}` : ""}` : "Giường trống"}
+                                                    className="f-body text-[10.5px] px-1.5 py-1 rounded-sm"
                                                     style={{
                                                       background: occByBed ? T.selectBg : "#fff",
                                                       border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
+                                                      cursor: occByBed ? "pointer" : "default",
                                                     }}
                                                   >
-                                                    <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
-                                                    <span style={{ color: T.inkSoft }}>{role} (G{bedNo}):</span>
-                                                    <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
+                                                    <div className="flex items-center gap-1" style={{ color: T.inkSoft }}>
+                                                      <BedDouble size={10} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
+                                                      <span className="f-mono" style={{ fontSize: 9 }}>{role} (G{bedNo})</span>
+                                                    </div>
+                                                    <div
+                                                      className="truncate"
+                                                      style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic", fontWeight: occByBed ? 600 : 400 }}
+                                                    >
                                                       {occByBed ? occByBed.name : "Trống"}
-                                                    </span>
+                                                    </div>
                                                   </div>
                                                 );
                                               })}
