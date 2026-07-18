@@ -783,6 +783,7 @@ function guessStudentField(header) {
   if (/khoá|khoa\s*học|^khoa$/.test(h)) return "khoa";
   if (/^lớp$|^lop$|class/.test(h)) return "lop";
   if (/đại\s*đội|dai\s*doi/.test(h)) return "daiDoi";
+  if (/đơn\s*vị.*tuyển\s*sinh|dvts/.test(h)) return "donViTuyenSinh";
   if (/năm\s*học/.test(h)) return "namHoc";
   if (/ngày\s*sinh|năm\s*sinh|dob|birth/.test(h)) return "dob";
   if (/sđt|điện\s*thoại|phone|sdt/.test(h)) return "phone";
@@ -798,6 +799,7 @@ const STUDENT_IMPORT_FIELDS = [
   { key: "khoa", label: "Khoá học" },
   { key: "lop", label: "Lớp" },
   { key: "daiDoi", label: "Đại đội" },
+  { key: "donViTuyenSinh", label: "Đơn vị tuyển sinh" },
   { key: "namHoc", label: "Năm học" },
   { key: "dob", label: "Ngày sinh" },
   { key: "phone", label: "SĐT" },
@@ -894,7 +896,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
 
   const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
   const mappedFileRows = dataRows.map((r) => {
-    const o = { stt: "", msv: "", name: "", gender: "", khoa: "", lop: "", daiDoi: "", namHoc: "", dob: "", phone: "", roomNumber: "" };
+    const o = { stt: "", msv: "", name: "", gender: "", khoa: "", lop: "", daiDoi: "", donViTuyenSinh: "", namHoc: "", dob: "", phone: "", roomNumber: "" };
     colMap.forEach((key, i) => { if (key && r[i] !== undefined) o[key] = String(r[i]).trim(); });
     if (o.dob) o.dob = normalizeDobInput(o.dob);
     if (o.gender) o.gender = normalizeGenderInput(o.gender);
@@ -933,6 +935,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
         khoa: String(r.khoa ?? "").trim(),
         lop: String(r.lop ?? "").trim(),
         daiDoi: String(r.daiDoi ?? "").trim(),
+        donViTuyenSinh: String(r.donViTuyenSinh ?? "").trim(),
         namHoc: String(r.namHoc ?? "").trim(),
         dob: normalizeDobInput(r.dob),
         phone: String(r.phone ?? "").trim(),
@@ -2154,6 +2157,7 @@ function RoomsTab({ perm }) {
                 ["Khoá", viewStudent.khoa],
                 ["Lớp", viewStudent.lop],
                 ["Đại đội", viewStudent.daiDoi],
+                ["Đơn vị tuyển sinh", viewStudent.donViTuyenSinh],
                 ["Năm học", viewStudent.namHoc],
                 ["Ngày sinh", formatDob(viewStudent.dob)],
                 ["Số điện thoại", viewStudent.phone],
@@ -2289,7 +2293,7 @@ function SwapBedModal({ student, students, rooms, onClose, onConfirm }) {
   );
 }
 
-const STUDENT_BLANK = { msv: "", name: "", gender: "Nam", khoa: "", lop: "", daiDoi: "", namHoc: "Năm 1", phone: "", dob: "", note: "" };
+const STUDENT_BLANK = { msv: "", name: "", gender: "Nam", khoa: "", lop: "", daiDoi: "", donViTuyenSinh: "", namHoc: "Năm 1", phone: "", dob: "", note: "" };
 
 function StudentsTab({ perm, user }) {
   const { items: students, setItems: setStudents, loading } = useSharedList("students");
@@ -2301,7 +2305,11 @@ function StudentsTab({ perm, user }) {
   const [warn, setWarn] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [search, setSearch] = useState("");
+  const [filterBuilding, setFilterBuilding] = useState("");
+  const [filterArea, setFilterArea] = useState("");
   const [filterRoom, setFilterRoom] = useState("");
+  const [filterLop, setFilterLop] = useState("");
+  const [filterYear, setFilterYear] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [transferTarget, setTransferTarget] = useState(null);
   const [swapTarget, setSwapTarget] = useState(null);
@@ -2344,12 +2352,29 @@ function StudentsTab({ perm, user }) {
   };
 
   const q = search.trim().toLowerCase();
+  // Danh mục để lọc nhanh — lấy từ dữ liệu phòng/sinh viên hiện có, luôn cập nhật theo dữ liệu thực tế.
+  const buildingOptions = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
+  const areaOptions = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
+  const roomOptions = rooms
+    .filter((r) => !filterBuilding || r.building === filterBuilding)
+    .filter((r) => !filterArea || r.area === filterArea)
+    .sort((a, b) => naturalCompare(a.building || "", b.building || "") || naturalCompare(a.area || "", b.area || "") || naturalCompare(String(a.roomNumber || ""), String(b.roomNumber || "")));
+  const lopOptions = [...new Set(students.map((s) => s.lop).filter(Boolean))].sort(naturalCompare);
+  const yearOptions = [...new Set(students.map((s) => (s.dob ? String(s.dob).split("-")[0] : "")).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+
   const filtered = students.filter((s) => {
+    const room = rooms.find((r) => r.id === s.roomId);
+    if (filterBuilding && room?.building !== filterBuilding) return false;
+    if (filterArea && room?.area !== filterArea) return false;
     if (filterRoom && String(s.roomId) !== filterRoom) return false;
+    if (filterLop && s.lop !== filterLop) return false;
+    if (filterYear && (!s.dob || String(s.dob).split("-")[0] !== filterYear)) return false;
     if (filterStatus && (s.status || "Chưa xếp phòng") !== filterStatus) return false;
     if (!q) return true;
-    const room = rooms.find((r) => r.id === s.roomId);
-    const haystack = [s.msv, s.name, s.gender, s.khoa, s.lop, s.daiDoi, s.namHoc, s.phone, room ? roomLabel(room) : ""].join(" ").toLowerCase();
+    const haystack = [
+      s.msv, s.name, s.gender, s.khoa, s.lop, s.daiDoi, s.donViTuyenSinh, s.namHoc, s.phone, formatDob(s.dob),
+      room ? roomLabel(room) : "", room?.building, room?.area, s.bed ? `giường ${s.bed}` : "",
+    ].join(" ").toLowerCase();
     return haystack.includes(q);
   });
 
@@ -2390,6 +2415,7 @@ function StudentsTab({ perm, user }) {
           <Field label="Khoá học"><input className={inputCls} style={inputStyle} value={form.khoa} onChange={(e) => setForm({ ...form, khoa: e.target.value })} placeholder="VD: K10" /></Field>
           <Field label="Lớp"><input className={inputCls} style={inputStyle} value={form.lop} onChange={(e) => setForm({ ...form, lop: e.target.value })} /></Field>
           <Field label="Đại đội (nếu áp dụng)"><input className={inputCls} style={inputStyle} value={form.daiDoi} onChange={(e) => setForm({ ...form, daiDoi: e.target.value })} placeholder="VD: Đại đội 3" /></Field>
+          <Field label="Đơn vị tuyển sinh"><input className={inputCls} style={inputStyle} value={form.donViTuyenSinh} onChange={(e) => setForm({ ...form, donViTuyenSinh: e.target.value })} placeholder="VD: Bộ CHQS tỉnh..." /></Field>
           <Field label="Năm học">
             <select className={inputCls} style={inputStyle} value={form.namHoc} onChange={(e) => setForm({ ...form, namHoc: e.target.value })}>
               {NAM_HOC_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -2405,11 +2431,27 @@ function StudentsTab({ perm, user }) {
       <div className="flex flex-wrap gap-3 mb-4">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.inkSoft }} />
-          <input className={inputCls} style={{ ...inputStyle, paddingLeft: 30 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm theo tên, MSV, phòng…" />
+          <input className={inputCls} style={{ ...inputStyle, paddingLeft: 30 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm theo tên, MSV, phòng, giường…" />
         </div>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => { setFilterBuilding(e.target.value); setFilterArea(""); setFilterRoom(""); }}>
+          <option value="">— Tất cả toà nhà —</option>
+          {buildingOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterArea} onChange={(e) => { setFilterArea(e.target.value); setFilterRoom(""); }}>
+          <option value="">— Tất cả tầng/khu vực —</option>
+          {areaOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
         <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterRoom} onChange={(e) => setFilterRoom(e.target.value)}>
           <option value="">— Tất cả phòng —</option>
-          {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+          {roomOptions.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterLop} onChange={(e) => setFilterLop(e.target.value)}>
+          <option value="">— Tất cả lớp —</option>
+          {lopOptions.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+          <option value="">— Tất cả năm sinh —</option>
+          {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
         <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="">— Tất cả trạng thái —</option>
@@ -2450,6 +2492,7 @@ function StudentsTab({ perm, user }) {
                         <Field label="Khoá học"><input className={inputCls} style={inputStyle} value={editForm.khoa} onChange={(e) => setEditForm({ ...editForm, khoa: e.target.value })} /></Field>
                         <Field label="Lớp"><input className={inputCls} style={inputStyle} value={editForm.lop} onChange={(e) => setEditForm({ ...editForm, lop: e.target.value })} /></Field>
                         <Field label="Đại đội"><input className={inputCls} style={inputStyle} value={editForm.daiDoi || ""} onChange={(e) => setEditForm({ ...editForm, daiDoi: e.target.value })} /></Field>
+                        <Field label="Đơn vị tuyển sinh"><input className={inputCls} style={inputStyle} value={editForm.donViTuyenSinh || ""} onChange={(e) => setEditForm({ ...editForm, donViTuyenSinh: e.target.value })} /></Field>
                         <Field label="Năm học">
                           <select className={inputCls} style={inputStyle} value={editForm.namHoc} onChange={(e) => setEditForm({ ...editForm, namHoc: e.target.value })}>
                             {NAM_HOC_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
@@ -2795,6 +2838,8 @@ function RosterTab({ perm }) {
   const byLop = groupCount(dangO, "lop");
   const hasDaiDoi = dangO.some((s) => (s.daiDoi || "").trim());
   const byDaiDoi = hasDaiDoi ? groupCount(dangO, "daiDoi") : null;
+  const hasDVTS = dangO.some((s) => (s.donViTuyenSinh || "").trim());
+  const byDVTS = hasDVTS ? groupCount(dangO, "donViTuyenSinh") : null;
 
   const StatBlock = ({ title, data }) => (
     <div className="stamp-border p-4" style={{ background: "#fff" }}>
@@ -2814,12 +2859,17 @@ function RosterTab({ perm }) {
     <div>
       <SectionHeader icon={Users} eyebrow="Quản lý" title="Quản lý quân số" />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <StatBlock title="Thống kê theo khoá" data={byKhoa} />
         <StatBlock title="Thống kê theo lớp" data={byLop} />
         {byDaiDoi ? <StatBlock title="Thống kê theo đại đội" data={byDaiDoi} /> : (
           <div className="stamp-border p-4 flex items-center justify-center" style={{ background: "#fff" }}>
             <span className="f-body text-xs italic text-center" style={{ color: T.inkSoft }}>Chưa có dữ liệu đại đội — có thể bổ sung khi thêm/sửa học viên.</span>
+          </div>
+        )}
+        {byDVTS ? <StatBlock title="Thống kê theo đơn vị tuyển sinh" data={byDVTS} /> : (
+          <div className="stamp-border p-4 flex items-center justify-center" style={{ background: "#fff" }}>
+            <span className="f-body text-xs italic text-center" style={{ color: T.inkSoft }}>Chưa có dữ liệu đơn vị tuyển sinh — có thể bổ sung khi thêm/sửa học viên.</span>
           </div>
         )}
       </div>
