@@ -16,16 +16,16 @@ import crest from "./assets/crest.png";
    Mono: Roboto Mono (số hiệu, ngày tháng, mã số)
 */
 const T = {
-  paper: "#EDE6D6",
-  paperDark: "#E2D9C4",
-  green: "#1F3328",
-  greenDark: "#131F19",
-  amber: "#E3A73E",
-  amberDark: "#B9822A",
-  red: "#A02334",
-  gold: "#C9A227",
-  ink: "#20241F",
-  inkSoft: "#5B5F52",
+  paper: "#F7F3E7",
+  paperDark: "#ECE4D0",
+  green: "#2D4B3B",
+  greenDark: "#1C2E24",
+  amber: "#E8AE4C",
+  amberDark: "#C28F35",
+  red: "#B23347",
+  gold: "#D4AF37",
+  ink: "#2A2E27",
+  inkSoft: "#6B6F60",
   selectBg: "#DCEAFC",
   selectBorder: "#2F6FBF",
 };
