@@ -710,6 +710,11 @@ function roomLabel(r) {
   if (!r) return "—";
   return `${r.building || "?"} - Phòng ${r.roomNumber || "?"}`;
 }
+// So sánh "tự nhiên": số đứng trước chữ, "2" trước "10" (không phải so theo ký tự) — dùng để sắp xếp
+// Toà nhà / Tầng / Số phòng theo đúng thứ tự khoa học thay vì thứ tự nhập liệu ngẫu nhiên.
+function naturalCompare(a, b) {
+  return String(a ?? "").localeCompare(String(b ?? ""), "vi", { numeric: true, sensitivity: "base" });
+}
 function formatDob(dob) {
   if (!dob) return "—";
   const parts = String(dob).split("-");
@@ -1538,26 +1543,40 @@ function RoomsTab({ perm }) {
     setMergeTarget("");
   };
 
-  const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
-  const areas = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))];
+  const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
+  const areas = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
   const filteredRooms = rooms.filter((r) =>
     (!filterBuilding || r.building === filterBuilding) &&
     (!filterArea || r.area === filterArea) &&
     (!filterStatus || (r.status || "Trống") === filterStatus)
   );
+  const UNKNOWN_BUILDING = "Chưa rõ toà nhà";
+  const UNKNOWN_AREA = "Chưa rõ tầng/khu vực";
   const grouped = filteredRooms.reduce((acc, r) => {
-    const k = r.building || "Chưa rõ toà nhà";
+    const k = r.building || UNKNOWN_BUILDING;
     (acc[k] = acc[k] || []).push(r);
     return acc;
   }, {});
-  // Nhóm phụ theo tầng/khu vực trong mỗi toà nhà (Quản lý tầng)
+  // Toà nhà xếp theo thứ tự tự nhiên (số trước chữ), toà chưa rõ luôn đẩy xuống cuối.
+  const buildingKeys = Object.keys(grouped).sort((a, b) => {
+    if (a === UNKNOWN_BUILDING) return 1;
+    if (b === UNKNOWN_BUILDING) return -1;
+    return naturalCompare(a, b);
+  });
+  // Nhóm phụ theo tầng/khu vực trong mỗi toà nhà, rồi sắp theo tầng, rồi theo số phòng — Toà nhà -> Tầng -> Phòng.
   const groupByArea = (list) => {
     const g = list.reduce((acc, r) => {
-      const k = r.area || "Chưa rõ tầng/khu vực";
+      const k = r.area || UNKNOWN_AREA;
       (acc[k] = acc[k] || []).push(r);
       return acc;
     }, {});
-    return Object.entries(g);
+    return Object.entries(g)
+      .sort(([a], [b]) => {
+        if (a === UNKNOWN_AREA) return 1;
+        if (b === UNKNOWN_AREA) return -1;
+        return naturalCompare(a, b);
+      })
+      .map(([area, roomsInArea]) => [area, [...roomsInArea].sort((x, y) => naturalCompare(x.roomNumber, y.roomNumber))]);
   };
 
   const statusColor = { "Trống": T.green, "Đang ở": T.amberDark, "Đang bảo trì": T.red };
@@ -1603,18 +1622,24 @@ function RoomsTab({ perm }) {
       </div>
 
       {loading ? <LoadingRow /> : filteredRooms.length === 0 ? <EmptyState text="Chưa có phòng nào phù hợp." /> : (
-        <div className="space-y-6">
-          {Object.entries(grouped).map(([building, list]) => (
-            <div key={building}>
-              <div className="f-display text-sm uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: T.amberDark }}>
-                <ChevronRight size={14} /> {building}
+        <div className="space-y-4">
+          {buildingKeys.map((building) => {
+            const list = grouped[building];
+            const areaGroups = groupByArea(list);
+            return (
+            <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
+              <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
+                <Building2 size={14} style={{ color: T.amber }} />
+                <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
+                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} phòng)</span>
               </div>
-              {groupByArea(list).map(([area, areaList]) => (
-              <div key={area} className="mb-4 last:mb-0">
-                {groupByArea(list).length > 1 && (
+              <div className="p-2.5">
+              {areaGroups.map(([area, areaList]) => (
+              <div key={area} className="mb-2.5 last:mb-0">
+                {areaGroups.length > 1 && (
                   <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
                 )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {areaList.map((r) => {
                   const occ = occupantsOf(r.id);
                   const cap = Number(r.capacity) || 0;
@@ -1729,8 +1754,10 @@ function RoomsTab({ perm }) {
               </div>
               </div>
               ))}
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
