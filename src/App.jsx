@@ -1627,10 +1627,12 @@ function RoomsTab({ perm }) {
   const [renameValue, setRenameValue] = useState("");
   const [viewStudentId, setViewStudentId] = useState(null); // Đang xem đầy đủ thông tin 1 học viên trong phòng
   const [swapStudent, setSwapStudent] = useState(null); // Đang đổi giường cho học viên này với 1 bạn cùng phòng
-  const confirmSwap = async (a, b) => {
+  // action = { bed, swapWithId }: chuyển học viên sang "bed"; nếu "bed" đó đang có người (swapWithId) thì
+  // người đó nhận lại giường cũ của học viên — còn nếu giường trống thì chỉ chuyển 1 chiều.
+  const confirmSwap = async (student, action) => {
     await setStudents(students.map((s) => {
-      if (s.id === a.id) return { ...s, bed: b.bed };
-      if (s.id === b.id) return { ...s, bed: a.bed };
+      if (s.id === student.id) return { ...s, bed: action.bed };
+      if (action.swapWithId && s.id === action.swapWithId) return { ...s, bed: student.bed };
       return s;
     }));
     setSwapStudent(null);
@@ -2260,15 +2262,25 @@ function TransferModal({ student, rooms, students, onClose, onConfirm }) {
 }
 
 // Đổi giường cho nhau giữa 2 sinh viên đang ở cùng 1 phòng — dùng khi học viên báo muốn hoán đổi chỗ nằm.
+// Đổi giường cho học viên: cho chọn bất kỳ giường nào trong phòng — nếu giường đó đang có người thì tự
+// hoán đổi qua lại, còn nếu đang trống thì chuyển thẳng sang (không cần phải có người để "đổi với").
 function SwapBedModal({ student, students, rooms, onClose, onConfirm }) {
   const room = rooms.find((r) => r.id === student.roomId);
-  const others = students.filter((s) => s.roomId === student.roomId && s.status !== "Đã trả phòng" && s.id !== student.id);
-  const [targetId, setTargetId] = useState("");
-  const target = others.find((s) => String(s.id) === String(targetId)) || null;
+  const cap = Number(room?.capacity) || 0;
+  const occupants = students.filter((s) => s.roomId === student.roomId && s.status !== "Đã trả phòng" && s.id !== student.id);
+  const occByBed = {};
+  occupants.forEach((s) => { if (s.bed) occByBed[String(s.bed)] = s; });
+
+  const bedOptions = cap > 0
+    ? Array.from({ length: cap }, (_, i) => String(i + 1)).filter((n) => n !== String(student.bed || ""))
+    : [...new Set(occupants.map((s) => String(s.bed)).filter(Boolean))];
+
+  const [targetBed, setTargetBed] = useState("");
+  const targetOccupant = targetBed ? occByBed[targetBed] || null : null;
 
   const confirm = () => {
-    if (!target) return;
-    onConfirm(student, target);
+    if (!targetBed) return;
+    onConfirm(student, { bed: targetBed, swapWithId: targetOccupant ? targetOccupant.id : null });
   };
 
   return (
@@ -2278,22 +2290,30 @@ function SwapBedModal({ student, students, rooms, onClose, onConfirm }) {
           Đổi giường — {student.name}
         </div>
         <div className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
-          Đang ở {room ? roomLabel(room) : "—"}{student.bed ? ` · Giường ${student.bed}` : " · chưa gán giường"}. Chọn bạn cùng phòng muốn hoán đổi giường — hệ thống sẽ tự đổi số giường qua lại cho cả hai.
+          Đang ở {room ? roomLabel(room) : "—"}{student.bed ? ` · Giường ${student.bed}` : " · chưa gán giường"}. Chọn giường muốn chuyển đến: nếu giường đó đang có bạn khác ở, hệ thống tự hoán đổi qua lại; nếu đang trống thì chuyển thẳng sang.
         </div>
-        {others.length === 0 ? (
-          <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Phòng này chưa có sinh viên nào khác để đổi giường.</div>
+        {bedOptions.length === 0 ? (
+          <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Phòng này chưa khai báo sức chứa hoặc không còn giường nào khác để chọn.</div>
         ) : (
-          <Field label="Đổi giường với" required>
-            <select className={inputCls} style={inputStyle} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
-              <option value="">— Chọn sinh viên —</option>
-              {others.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} · {s.bed ? `Giường ${s.bed}` : "chưa gán giường"}</option>
-              ))}
+          <Field label="Chuyển đến giường" required>
+            <select className={inputCls} style={inputStyle} value={targetBed} onChange={(e) => setTargetBed(e.target.value)}>
+              <option value="">— Chọn giường —</option>
+              {bedOptions
+                .sort((a, b) => Number(a) - Number(b))
+                .map((n) => {
+                  const occ = occByBed[n];
+                  const { role } = bedPosition(Number(n));
+                  return (
+                    <option key={n} value={n}>
+                      Giường {n} ({role}) — {occ ? `${occ.name} (sẽ đổi qua lại)` : "Trống"}
+                    </option>
+                  );
+                })}
             </select>
           </Field>
         )}
         <div className="flex gap-2 mt-2">
-          <Btn onClick={confirm} disabled={!target}>Xác nhận đổi giường</Btn>
+          <Btn onClick={confirm} disabled={!targetBed}>Xác nhận đổi giường</Btn>
           <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
         </div>
       </div>
@@ -2348,11 +2368,12 @@ function StudentsTab({ perm, user }) {
     await setStudents(students.map((s) => (s.id === transferTarget.id ? { ...s, roomId, bed, status: "Đang ở" } : s)));
     setTransferTarget(null);
   };
-  // Hoán đổi số giường qua lại giữa 2 sinh viên cùng phòng (báo quản lý muốn đổi chỗ nằm cho nhau).
-  const confirmSwap = async (a, b) => {
+  // Chuyển học viên sang giường được chọn; nếu giường đó đang có người thì tự hoán đổi qua lại,
+  // nếu đang trống thì chuyển thẳng — dùng khi học viên báo muốn đổi chỗ nằm.
+  const confirmSwap = async (student, action) => {
     await setStudents(students.map((s) => {
-      if (s.id === a.id) return { ...s, bed: b.bed };
-      if (s.id === b.id) return { ...s, bed: a.bed };
+      if (s.id === student.id) return { ...s, bed: action.bed };
+      if (action.swapWithId && s.id === action.swapWithId) return { ...s, bed: student.bed };
       return s;
     }));
     setWarn("");
