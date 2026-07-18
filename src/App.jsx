@@ -200,6 +200,23 @@ function CornerMarks({ inset = 10, length = 18, color }) {
 /* ============ BÁO LỖI TRỰC TIẾP TRÊN MÀN HÌNH (không cần mở DevTools) ============ */
 let _globalErrors = [];
 let _errorListeners = [];
+
+async function downloadFileFromUrl(url, filename) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    window.open(url, "_blank");
+  }
+}
 function reportGlobalError(message) {
   const entry = { id: Date.now() + Math.random(), message };
   _globalErrors = [..._globalErrors, entry].slice(-4);
@@ -1238,6 +1255,17 @@ function RoomForm({ initial, onCancel, onSave, warn }) {
       <div className="md:col-span-3">
         <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
       </div>
+      <div className="md:col-span-3">
+        <Field label="Ảnh phòng (tuỳ chọn)">
+          <UploadField onUploaded={(url) => setForm((f) => ({ ...f, imageUrl: url }))} />
+          {form.imageUrl && (
+            <div className="flex items-center gap-2 mt-2">
+              <img src={form.imageUrl} alt="Ảnh phòng" className="w-24 h-24 object-cover stamp-border" />
+              <button type="button" onClick={() => setForm((f) => ({ ...f, imageUrl: "" }))} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá ảnh</button>
+            </div>
+          )}
+        </Field>
+      </div>
       <div className="md:col-span-3 flex gap-2">
         <Btn onClick={() => onSave(form)}>Lưu</Btn>
         <Btn variant="outline" onClick={onCancel}>Huỷ</Btn>
@@ -1259,7 +1287,7 @@ function RoomsTab({ perm }) {
   const [mergeFrom, setMergeFrom] = useState(null);
   const [mergeTarget, setMergeTarget] = useState("");
 
-  const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "" };
+  const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
 
   const occupantsOf = (roomId) => students.filter((s) => s.roomId === roomId && s.status !== "Đã trả phòng");
 
@@ -1374,7 +1402,7 @@ function RoomsTab({ perm }) {
                     return (
                       <div key={r.id} className="sm:col-span-2 lg:col-span-3">
                         <RoomForm
-                          initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "" }}
+                          initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "", imageUrl: r.imageUrl || "" }}
                           warn={warn}
                           onCancel={() => setEditingId(null)}
                           onSave={saveEdit}
@@ -1397,6 +1425,21 @@ function RoomsTab({ perm }) {
                         Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
                       </div>
                       {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
+
+                      {r.imageUrl && (
+                        <div className="mt-2 relative group">
+                          <img src={r.imageUrl} alt={`Ảnh phòng ${r.roomNumber}`} className="w-full h-32 object-cover stamp-border" />
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); downloadFileFromUrl(r.imageUrl, `phong-${r.roomNumber}.jpg`); }}
+                            title="Tải ảnh về máy"
+                            className="absolute bottom-1.5 right-1.5 flex items-center gap-1 px-2 py-1 rounded-sm f-mono text-[10px] btn-press"
+                            style={{ background: "rgba(31,51,40,0.85)", color: "#fff", border: "none" }}
+                          >
+                            <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Tải về
+                          </button>
+                        </div>
+                      )}
 
                       {expandedId === r.id && (
                         <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
@@ -1996,7 +2039,7 @@ function RosterTab({ perm }) {
 /* ============================================================
    TAB: TÀI SẢN & THIẾT BỊ TRONG PHÒNG (điện, nước, cơ sở vật chất)
    ============================================================ */
-const ASSET_BLANK = { roomId: "", name: "", category: "Cơ sở vật chất", quantity: "1", status: "Tốt", note: "" };
+const ASSET_BLANK = { roomId: "", name: "", category: "Cơ sở vật chất", quantity: "1", status: "Tốt", note: "", imageUrl: "" };
 
 function AssetsTab({ perm, user }) {
   const { items: assets, setItems: setAssets, loading } = useSharedList("assets");
@@ -2065,6 +2108,17 @@ function AssetsTab({ perm, user }) {
             </select>
           </Field>
           <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+          <div className="md:col-span-3">
+            <Field label="Ảnh tài sản (tuỳ chọn)">
+              <UploadField onUploaded={(url) => setForm((f) => ({ ...f, imageUrl: url }))} />
+              {form.imageUrl && (
+                <div className="flex items-center gap-2 mt-2">
+                  <img src={form.imageUrl} alt="Ảnh tài sản" className="w-20 h-20 object-cover stamp-border" />
+                  <button type="button" onClick={() => setForm((f) => ({ ...f, imageUrl: "" }))} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá ảnh</button>
+                </div>
+              )}
+            </Field>
+          </div>
           <div className="md:col-span-3"><Btn onClick={add}>Lưu</Btn></div>
         </div>
       )}
@@ -2086,6 +2140,7 @@ function AssetsTab({ perm, user }) {
             <thead>
               <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
                 <th className="text-left px-3 py-2">Phòng</th>
+                <th className="text-left px-3 py-2">Ảnh</th>
                 <th className="text-left px-3 py-2">Tên thiết bị</th>
                 <th className="text-left px-3 py-2">Phân loại</th>
                 <th className="text-left px-3 py-2">SL</th>
@@ -2100,7 +2155,7 @@ function AssetsTab({ perm, user }) {
                 const room = rooms.find((r) => r.id === a.roomId);
                 if (editingId === a.id) {
                   return (
-                    <tr key={a.id}><td colSpan={8} className="p-2">
+                    <tr key={a.id}><td colSpan={9} className="p-2">
                       <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
                         <Field label="Phòng">
                           <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
@@ -2120,6 +2175,17 @@ function AssetsTab({ perm, user }) {
                           </select>
                         </Field>
                         <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} /></Field>
+                        <div className="md:col-span-3">
+                          <Field label="Ảnh tài sản (tuỳ chọn)">
+                            <UploadField onUploaded={(url) => setEditForm((f) => ({ ...f, imageUrl: url }))} />
+                            {editForm.imageUrl && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <img src={editForm.imageUrl} alt="Ảnh tài sản" className="w-20 h-20 object-cover stamp-border" />
+                                <button type="button" onClick={() => setEditForm((f) => ({ ...f, imageUrl: "" }))} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá ảnh</button>
+                              </div>
+                            )}
+                          </Field>
+                        </div>
                         <div className="md:col-span-3 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={() => setEditingId(null)}>Huỷ</Btn></div>
                       </div>
                     </td></tr>
@@ -2128,6 +2194,22 @@ function AssetsTab({ perm, user }) {
                 return (
                   <tr key={a.id} onClick={() => setSelectedId((id) => (id === a.id ? null : a.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === a.id)}>
                     <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2">
+                      {a.imageUrl ? (
+                        <div className="relative w-12 h-12 group">
+                          <img src={a.imageUrl} alt={a.name} className="w-12 h-12 object-cover stamp-border" />
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); downloadFileFromUrl(a.imageUrl, `tai-san-${(a.name || "item").replace(/\s+/g, "-")}.jpg`); }}
+                            title="Tải ảnh về máy"
+                            className="absolute -bottom-1 -right-1 p-1 rounded-full"
+                            style={{ background: T.green, color: "#fff", border: `1px solid #fff` }}
+                          >
+                            <Upload size={9} style={{ transform: "rotate(180deg)", display: "block" }} />
+                          </button>
+                        </div>
+                      ) : <span style={{ color: T.inkSoft }}>—</span>}
+                    </td>
                     <td className="px-3 py-2 font-medium">{a.name}</td>
                     <td className="px-3 py-2">{a.category}</td>
                     <td className="px-3 py-2 f-mono">{a.quantity || 1}</td>
