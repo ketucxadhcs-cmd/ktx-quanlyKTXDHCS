@@ -1651,18 +1651,33 @@ function RoomsTab({ perm }) {
                   cuộn ngang để xem hết các tầng. Trong mỗi tầng, phòng xếp dọc từ trên xuống theo số phòng
                   (101, 102, 103…), cuộn dọc riêng từng tầng nếu tầng có nhiều phòng. */}
               <div className="overflow-x-auto pb-1.5 scrollbar-thin">
-                <div className="flex items-start gap-3" style={{ width: "max-content" }}>
-                  {areaGroups.map(([area, areaList]) => (
-                    <div key={area} className="flex-shrink-0" style={{ width: 208 }}>
+                <div className="flex items-stretch gap-0" style={{ width: "max-content" }}>
+                  {areaGroups.map(([area, areaList], areaIdx) => (
+                    <div
+                      key={area}
+                      className="flex-shrink-0"
+                      style={{
+                        width: 208,
+                        paddingLeft: areaIdx > 0 ? 14 : 0,
+                        marginLeft: areaIdx > 0 ? 14 : 0,
+                        borderLeft: areaIdx > 0 ? `2px dashed ${T.paperDark}` : "none",
+                      }}
+                    >
                       {areaGroups.length > 1 && (
-                        <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
+                        <div
+                          className="f-display text-[13px] font-bold uppercase tracking-wider mb-2 px-2.5 py-1.5 text-center rounded-sm"
+                          style={{ color: T.paper, background: T.green, boxShadow: `inset 0 0 0 1px ${T.gold}` }}
+                        >
+                          {area}
+                        </div>
                       )}
-                      <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 560 }}>
+                      <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 560, minHeight: areaList.length > 0 ? 0 : "auto" }}>
                         {areaList.filter((r) => editingId !== r.id).map((r) => {
                           const occ = occupantsOf(r.id);
                           const cap = Number(r.capacity) || 0;
                           return (
                             <div key={r.id} className="stamp-border card-item p-3" style={{ background: "#fff" }}>
+
                               <div className="flex items-start justify-between gap-2">
                                 <div className="cursor-pointer" onClick={() => setExpandedId((id) => (id === r.id ? null : r.id))}>
                                   <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
