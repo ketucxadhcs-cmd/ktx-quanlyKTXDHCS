@@ -2822,6 +2822,9 @@ function UtilitiesTab({ perm, user }) {
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editWarn, setEditWarn] = useState("");
 
   const submit = async () => {
     if (!form.roomId || !form.month) { setWarn("Vui lòng chọn Phòng và Tháng trước khi lưu."); return; }
@@ -2838,6 +2841,20 @@ function UtilitiesTab({ perm, user }) {
     setShowForm(false);
   };
   const remove = async (id) => setRecords(records.filter((r) => r.id !== id));
+
+  const startEdit = (r) => { setEditingId(r.id); setEditForm({ roomId: r.roomId, month: r.month, electricityIndex: String(r.electricityIndex), waterIndex: String(r.waterIndex) }); setEditWarn(""); };
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditWarn(""); };
+  const saveEdit = async () => {
+    if (!editForm.roomId || !editForm.month) { setEditWarn("Vui lòng chọn đủ Phòng và Tháng."); return; }
+    if (records.some((r) => r.id !== editingId && String(r.roomId) === String(editForm.roomId) && r.month === editForm.month)) {
+      setEditWarn("Phòng này đã có chỉ số điện/nước cho tháng đã chọn ở một bản ghi khác.");
+      return;
+    }
+    await setRecords(records.map((r) => (r.id === editingId
+      ? { ...r, roomId: Number(editForm.roomId), month: editForm.month, electricityIndex: Number(editForm.electricityIndex) || 0, waterIndex: Number(editForm.waterIndex) || 0, editedBy: user, editedAt: new Date().toISOString() }
+      : r)));
+    cancelEdit();
+  };
 
   // Tính tiêu thụ = chỉ số tháng này - chỉ số tháng liền trước (cùng phòng)
   const withUsage = records.map((r) => {
@@ -2945,12 +2962,36 @@ function UtilitiesTab({ perm, user }) {
                 <th className="text-left px-3 py-2">Điện tiêu thụ</th>
                 <th className="text-left px-3 py-2">Chỉ số nước</th>
                 <th className="text-left px-3 py-2">Nước tiêu thụ</th>
-                <th className="px-3 py-2 w-10"></th>
+                <th className="px-3 py-2 w-20"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r, i) => {
                 const room = rooms.find((x) => x.id === r.roomId);
+                if (editingId === r.id) {
+                  return (
+                    <tr key={r.id}><td colSpan={7} className="p-2">
+                      <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
+                        <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
+                        <Field label="Phòng">
+                          <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
+                            {rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Tháng">
+                          <input type="month" className={inputCls} style={inputStyle} value={editForm.month} onChange={(e) => setEditForm({ ...editForm, month: e.target.value })} />
+                        </Field>
+                        <Field label="Chỉ số điện (kWh)">
+                          <input type="number" className={inputCls} style={inputStyle} value={editForm.electricityIndex} onChange={(e) => setEditForm({ ...editForm, electricityIndex: e.target.value })} />
+                        </Field>
+                        <Field label="Chỉ số nước (m³)">
+                          <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
+                        </Field>
+                        <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
+                      </div>
+                    </td></tr>
+                  );
+                }
                 return (
                   <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
                     <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
@@ -2960,7 +3001,12 @@ function UtilitiesTab({ perm, user }) {
                     <td className="px-3 py-2 f-mono">{r.waterIndex}</td>
                     <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
                     <td className="px-3 py-2 text-right">
-                      {perm.canMaintain && <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+                      {perm.canMaintain && (
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                          <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
