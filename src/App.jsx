@@ -1,0 +1,3338 @@
+import React, { useState, useEffect, useCallback, useId, useRef } from "react";
+import {
+  Shield, Users, DoorOpen, Wrench, Boxes, FolderOpen, LogOut, Plus, Trash2, Star,
+  ChevronRight, Loader2, X, ClipboardCheck, CheckCircle2, Circle, Paperclip, MapPin,
+  Image as ImageIcon, Menu, KeyRound, Pencil, Search, Eye, EyeOff, Upload, FileSpreadsheet,
+  ArrowRightLeft, LayoutGrid, Building2, BedDouble, AlertTriangle, Bell, Zap,
+} from "lucide-react";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { db } from "./firebase";
+import crest from "./assets/crest.png";
+
+/* ============ THEME =============
+   Nền hồ sơ giấy cũ, xanh cảnh phục, vàng CSGT, đỏ hiệu lệnh, vàng sao.
+   Display: Oswald (nhãn, tiêu đề, kiểu bảng công vụ)
+   Body: Be Vietnam Pro (đọc tiếng Việt tốt)
+   Mono: Roboto Mono (số hiệu, ngày tháng, mã số)
+*/
+const T = {
+  paper: "#EDE6D6",
+  paperDark: "#E2D9C4",
+  green: "#1F3328",
+  greenDark: "#131F19",
+  amber: "#E3A73E",
+  amberDark: "#B9822A",
+  red: "#A02334",
+  gold: "#C9A227",
+  ink: "#20241F",
+  inkSoft: "#5B5F52",
+  selectBg: "#DCEAFC",
+  selectBorder: "#2F6FBF",
+};
+
+// Trộn thêm hiệu ứng tô xanh nước biển khi dòng đang được chọn (dùng chung cho mọi danh sách)
+function withSelect(style, selected) {
+  return selected
+    ? { ...style, background: T.selectBg, boxShadow: `inset 0 0 0 2px ${T.selectBorder}` }
+    : style;
+}
+
+const KTX_PASSWORD_DEFAULT = "KTXCSND"; // Mật khẩu chung mặc định — đổi được ở mục "Đổi mật khẩu"
+const ADMIN_PASSWORD_DEFAULT = "KTXADMIN"; // Mật khẩu quản trị mặc định — đổi được ở mục "Đổi mật khẩu"
+const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký túc xá (không lẫn dữ liệu khác)
+
+/* ============ PHÂN QUYỀN ============
+   admin  : đăng nhập bằng ADMIN_PASSWORD — toàn quyền, kể cả gán quyền cho người khác
+   can_bo : được quản trị gán — quyền quản lý phòng ở, sinh viên, tài sản, cập nhật bảo trì (Ban quản lý / Kỹ thuật KTX)
+   sinh_vien: mặc định — chỉ được gửi yêu cầu bảo trì và xem thông tin, tự xoá yêu cầu do chính mình gửi
+*/
+const normalizeName = (n) => (n || "").trim().toLowerCase();
+
+// Tải file thật sự về máy (giống Zalo/Messenger) thay vì chỉ mở tab mới xem ảnh.
+function forceDownload(url, filename) {
+  if (!url) return;
+  const cloudinaryMatch = url.match(/^(https:\/\/res\.cloudinary\.com\/[^/]+\/(?:image|video|raw)\/upload\/)(.*)$/);
+  if (cloudinaryMatch) {
+    const dlUrl = `${cloudinaryMatch[1]}fl_attachment/${cloudinaryMatch[2]}`;
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    a.rel = "noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  fetch(url, { mode: "cors" })
+    .then((res) => { if (!res.ok) throw new Error("fetch failed"); return res.blob(); })
+    .then((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename || url.split("/").pop().split("?")[0] || "tai-ve";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 8000);
+    })
+    .catch(() => window.open(url, "_blank"));
+}
+
+const FONT_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap');
+.f-display { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+.f-body { font-family: 'Be Vietnam Pro', sans-serif; }
+.f-mono { font-family: 'Roboto Mono', monospace; }
+.paper-tex {
+  background-color: ${T.paper};
+  background-image:
+    radial-gradient(${T.paperDark} 0.6px, transparent 0.6px);
+  background-size: 14px 14px;
+}
+.stamp-border { border: 1.5px solid ${T.gold}; }
+.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: ${T.green}; border-radius: 4px; }
+.card-sheet {
+  box-shadow: 0 2px 6px rgba(19,31,25,0.08), 0 14px 30px -14px rgba(19,31,25,0.22);
+}
+.card-item {
+  box-shadow: 0 1px 2px rgba(19,31,25,0.05), 0 5px 14px -6px rgba(19,31,25,0.14);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+.card-item:hover {
+  box-shadow: 0 2px 4px rgba(19,31,25,0.07), 0 8px 18px -6px rgba(19,31,25,0.18);
+}
+.input-plain:focus {
+  box-shadow: 0 0 0 3px rgba(227,167,62,0.35);
+  border-color: ${T.green};
+}
+.btn-press { transition: filter 0.15s ease, transform 0.1s ease; }
+.btn-press:hover { filter: brightness(1.08); }
+.btn-press:active { transform: translateY(1px); }
+.nav-item { transition: background-color 0.15s ease, border-color 0.15s ease; position: relative; }
+.nav-item:hover:not(.nav-item-active) { background: rgba(255,255,255,0.06) !important; }
+.icon-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 999px; flex-shrink: 0;
+}
+:focus-visible { outline: 2px solid ${T.amber}; outline-offset: 2px; }
+.drawer-backdrop { transition: opacity 0.25s ease; }
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+}
+`;
+
+/* ============ EMBLEM (huy hiệu Trường Đại học Cảnh sát nhân dân) ============ */
+function Emblem({ size = 56, ring = false }) {
+  const img = (
+    <img
+      src={crest}
+      alt="Huy hiệu Trường Đại học Cảnh sát nhân dân"
+      width={size}
+      height={size}
+      style={{ width: size, height: size, objectFit: "contain", display: "block" }}
+    />
+  );
+  if (!ring) return img;
+  const pad = Math.round(size * 0.16);
+  return (
+    <div
+      style={{
+        width: size + pad * 2,
+        height: size + pad * 2,
+        borderRadius: "999px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: T.greenDark,
+        border: `1px solid ${T.gold}`,
+        boxShadow: "0 2px 6px rgba(0,0,0,0.35), inset 0 0 0 3px rgba(227,167,62,0.12)",
+      }}
+    >
+      {img}
+    </div>
+  );
+}
+
+/* ============ SEAL (con dấu tròn trang trí — điểm nhấn thị giác) ============ */
+function Seal({ size = 130, opacity = 1 }) {
+  const rid = useId().replace(/[:]/g, "");
+  const label = "KÝ TÚC XÁ · ĐẠI HỌC CẢNH SÁT NHÂN DÂN · QUẢN LÝ NỘI TRÚ · ";
+  return (
+    <div style={{ position: "relative", width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 200 200" width={size} height={size} style={{ position: "absolute", inset: 0 }}>
+        <defs>
+          <path id={`sealpath-${rid}`} d="M 100,100 m -80,0 a 80,80 0 1,1 160,0 a 80,80 0 1,1 -160,0" />
+        </defs>
+        <circle cx="100" cy="100" r="94" fill="none" stroke={T.red} strokeWidth="1.2" opacity={opacity} />
+        <circle cx="100" cy="100" r="63" fill="none" stroke={T.red} strokeWidth="1" opacity={opacity} />
+        <text fontSize="10.5" fill={T.red} letterSpacing="1.5" opacity={opacity}>
+          <textPath href={`#sealpath-${rid}`} startOffset="0%">{label}</textPath>
+        </text>
+      </svg>
+      <img
+        src={crest}
+        alt=""
+        style={{
+          position: "absolute", top: "50%", left: "50%",
+          transform: "translate(-50%,-50%)",
+          width: size * 0.46, height: "auto",
+          opacity,
+        }}
+      />
+    </div>
+  );
+}
+
+/* ============ CORNER MARKS (góc chỉ dẫn kiểu hồ sơ công vụ) ============ */
+function CornerMarks({ inset = 10, length = 18, color }) {
+  const c = color || T.gold;
+  const base = { position: "absolute", width: length, height: length, borderColor: c };
+  return (
+    <>
+      <span style={{ ...base, top: inset, left: inset, borderTop: `2px solid ${c}`, borderLeft: `2px solid ${c}` }} />
+      <span style={{ ...base, top: inset, right: inset, borderTop: `2px solid ${c}`, borderRight: `2px solid ${c}` }} />
+      <span style={{ ...base, bottom: inset, left: inset, borderBottom: `2px solid ${c}`, borderLeft: `2px solid ${c}` }} />
+      <span style={{ ...base, bottom: inset, right: inset, borderBottom: `2px solid ${c}`, borderRight: `2px solid ${c}` }} />
+    </>
+  );
+}
+
+/* ============ BÁO LỖI TRỰC TIẾP TRÊN MÀN HÌNH (không cần mở DevTools) ============ */
+let _globalErrors = [];
+let _errorListeners = [];
+function reportGlobalError(message) {
+  const entry = { id: Date.now() + Math.random(), message };
+  _globalErrors = [..._globalErrors, entry].slice(-4);
+  _errorListeners.forEach((fn) => fn(_globalErrors));
+}
+function useGlobalErrors() {
+  const [errors, setErrors] = useState(_globalErrors);
+  useEffect(() => {
+    _errorListeners.push(setErrors);
+    return () => { _errorListeners = _errorListeners.filter((fn) => fn !== setErrors); };
+  }, []);
+  const dismiss = (id) => {
+    _globalErrors = _globalErrors.filter((e) => e.id !== id);
+    setErrors(_globalErrors);
+  };
+  return { errors, dismiss };
+}
+function ErrorBanner() {
+  const { errors, dismiss } = useGlobalErrors();
+  if (errors.length === 0) return null;
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999 }} className="p-2 space-y-1.5">
+      {errors.map((e) => (
+        <div
+          key={e.id}
+          className="f-body text-xs px-4 py-3 flex items-start justify-between gap-3"
+          style={{ background: T.red, color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+        >
+          <span className="flex-1"><b>Lỗi kết nối dữ liệu:</b> {e.message}</span>
+          <button onClick={() => dismiss(e.id)} style={{ color: "#fff" }} aria-label="Đóng"><X size={15} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ============ STORAGE HOOK (Firestore) ============
+   Mỗi "key" tương ứng với một document trong collection riêng của trang Ký túc xá.
+   Dùng onSnapshot để đồng bộ real-time: một người thêm/xoá, mọi người khác
+   thấy ngay lập tức mà không cần tải lại trang.
+*/
+function useSharedList(key) {
+  const [items, setItemsState] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    const ref = doc(db, DATA_NS, key);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          try {
+            setItemsState(data.value ? JSON.parse(data.value) : []);
+          } catch (e) {
+            setItemsState([]);
+          }
+        } else {
+          setItemsState([]);
+        }
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        const msg = `Đọc "${key}" thất bại — ${err?.code || ""} ${err?.message || err}`;
+        setError(msg);
+        setLoading(false);
+        reportGlobalError(msg);
+      }
+    );
+    return () => unsub();
+  }, [key]);
+
+  const persist = async (next) => {
+    setItemsState(next);
+    try {
+      const ref = doc(db, DATA_NS, key);
+      await setDoc(ref, { value: JSON.stringify(next) });
+    } catch (e) {
+      const msg = `Lưu "${key}" thất bại — ${e?.code || ""} ${e?.message || e}`;
+      setError(msg);
+      reportGlobalError(msg);
+    }
+  };
+
+  return { items, setItems: persist, loading, error };
+}
+
+/* ============ CẤU HÌNH DÙNG CHUNG (1 tài liệu duy nhất) ============ */
+function useSingleDoc(key, defaultValue) {
+  const [value, setValueState] = useState(defaultValue);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ref = doc(db, DATA_NS, key);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists() && snap.data().value) {
+          try {
+            setValueState({ ...defaultValue, ...JSON.parse(snap.data().value) });
+          } catch (e) {
+            // giữ mặc định nếu dữ liệu lỗi
+          }
+        }
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const update = async (next) => {
+    setValueState(next);
+    try {
+      await setDoc(doc(db, DATA_NS, key), { value: JSON.stringify(next) });
+      return true;
+    } catch (e) {
+      reportGlobalError(`Lưu "${key}" thất bại — ${e?.code || ""} ${e?.message || e}`);
+      return false;
+    }
+  };
+
+  return { value, setValue: update, loading };
+}
+
+function useAuthConfig() {
+  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ref = doc(db, DATA_NS, "authConfig");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists() && snap.data().value) {
+          try {
+            const parsed = JSON.parse(snap.data().value);
+            setConfigState({
+              unitPassword: parsed.unitPassword || KTX_PASSWORD_DEFAULT,
+              adminPassword: parsed.adminPassword || ADMIN_PASSWORD_DEFAULT,
+            });
+          } catch (e) {
+            // giữ mặc định nếu dữ liệu lỗi
+          }
+        }
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return () => unsub();
+  }, []);
+
+  const update = async (next) => {
+    setConfigState(next);
+    try {
+      await setDoc(doc(db, DATA_NS, "authConfig"), { value: JSON.stringify(next) });
+      return true;
+    } catch (e) {
+      reportGlobalError(`Đổi mật khẩu thất bại — ${e?.code || ""} ${e?.message || e}`);
+      return false;
+    }
+  };
+
+  return { config, setConfig: update, loading };
+}
+
+/* ============ PHÂN QUYỀN THEO NGƯỜI DÙNG ============ */
+function useRole(user, isAdminLogin) {
+  const { items: permissions, setItems: setPermissions, loading: permLoading } = useSharedList("permissions");
+  const explicit = permissions.find((p) => normalizeName(p.name) === normalizeName(user));
+
+  let role = "sinh_vien";
+  if (isAdminLogin) role = "admin";
+  else if (explicit) role = explicit.role;
+
+  const canManage = role === "admin" || role === "can_bo";
+  const canMaintain = canManage || role === "ky_thuat";
+
+  const perm = {
+    name: user,
+    role,
+    isAdmin: role === "admin",
+    canManage,
+    canMaintain,
+    isOwner: (ownerName) => normalizeName(ownerName) === normalizeName(user),
+  };
+  return { perm, permissions, setPermissions, permLoading };
+}
+
+/* ============ SMALL UI HELPERS ============ */
+function SectionHeader({ icon: Icon, eyebrow, title, action, compact }) {
+  return (
+    <div className={compact ? "flex items-center justify-between mb-3 pb-2.5 flex-wrap gap-2" : "flex items-center justify-between mb-5 pb-4 flex-wrap gap-3"} style={{ borderBottom: `1px solid ${T.paperDark}` }}>
+      <div>
+        <div className={compact ? "f-mono text-[10px] tracking-widest uppercase" : "f-mono text-xs tracking-widest uppercase"} style={{ color: T.amberDark }}>{eyebrow}</div>
+        <h2 className={compact ? "f-display text-base md:text-lg font-semibold flex items-center gap-1.5 mt-0.5" : "f-display text-2xl md:text-3xl font-semibold flex items-center gap-2.5 mt-0.5"} style={{ color: T.green }}>
+          <Icon size={compact ? 16 : 22} /> {title}
+        </h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function Btn({ children, onClick, variant = "solid", type = "button", disabled, size }) {
+  const base = size === "sm"
+    ? "f-display text-[11px] tracking-wide uppercase px-2.5 py-1.5 flex items-center gap-1.5 disabled:opacity-50 btn-press"
+    : "f-display text-sm tracking-wide uppercase px-4 py-2 flex items-center gap-2 disabled:opacity-50 btn-press";
+  const style =
+    variant === "solid"
+      ? { background: T.green, color: T.paper, boxShadow: "0 1px 2px rgba(19,31,25,0.25)" }
+      : variant === "danger"
+      ? { background: "transparent", color: T.red, border: `1.5px solid ${T.red}` }
+      : { background: "transparent", color: T.green, border: `1.5px solid ${T.green}` };
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} className={base} style={style}>
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children, required }) {
+  return (
+    <label className="block mb-3">
+      <span className="f-mono text-[11px] uppercase tracking-widest block mb-1" style={{ color: T.inkSoft }}>
+        {label}
+        {required && <span style={{ color: T.red }} title="Bắt buộc nhập"> *</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+const inputStyle = { background: "#fff", border: `1px solid #C9BFA5`, color: T.ink };
+const inputCls = "f-body w-full px-3 py-2 outline-none text-sm rounded-sm input-plain";
+
+function PasswordInput({ value, onChange, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? "text" : "password"}
+        className={inputCls}
+        style={{ ...inputStyle, paddingRight: 36 }}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute right-2 top-1/2 -translate-y-1/2"
+        style={{ color: T.inkSoft }}
+        title={show ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
+function FormWarning({ message }) {
+  if (!message) return null;
+  return (
+    <div
+      className="f-body text-xs px-3 py-2.5 mb-3 flex items-start gap-2"
+      style={{ background: "#FCEBEA", color: T.red, border: `1px solid ${T.red}` }}
+      role="alert"
+    >
+      <span className="shrink-0">⚠</span> <span>{message}</span>
+    </div>
+  );
+}
+
+function LoadingRow() {
+  return <div className="flex items-center gap-2 f-body text-sm py-6" style={{ color: T.inkSoft }}><Loader2 size={16} className="animate-spin" /> Đang tải dữ liệu…</div>;
+}
+
+function EmptyState({ text }) {
+  return <div className="f-body text-sm italic py-8 text-center" style={{ color: T.inkSoft }}>{text}</div>;
+}
+
+/* ============ UPLOAD FIELD (tải ảnh/tệp trực tiếp từ máy — dùng Cloudinary) ============ */
+function UploadField({ onUploaded }) {
+  const [status, setStatus] = useState("idle"); // idle | uploading | done | error
+  const [errMsg, setErrMsg] = useState("");
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+  const configured = Boolean(cloudName && uploadPreset);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!configured) {
+      setStatus("error");
+      setErrMsg("Chưa cấu hình Cloudinary (xem README).");
+      return;
+    }
+    setStatus("uploading");
+    try {
+      const resourceType = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "raw";
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("upload_preset", uploadPreset);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.secure_url) {
+        onUploaded(data.secure_url);
+        setStatus("done");
+      } else {
+        setStatus("error");
+        setErrMsg(data?.error?.message || "Không rõ nguyên nhân, thử lại.");
+      }
+    } catch (err) {
+      setStatus("error");
+      setErrMsg(String(err?.message || err));
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+      <label
+        className="f-display text-[11px] uppercase tracking-wider px-3 py-1.5 flex items-center gap-1.5 cursor-pointer btn-press"
+        style={{ border: `1px solid ${T.green}`, color: T.green }}
+      >
+        {status === "uploading" ? <Loader2 size={12} className="animate-spin" /> : <Paperclip size={12} />}
+        {status === "uploading" ? "Đang tải lên…" : "Tải ảnh / tệp từ máy"}
+        <input
+          type="file"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+          className="hidden"
+          onChange={handleFile}
+          disabled={status === "uploading"}
+        />
+      </label>
+      {status === "done" && (
+        <span className="f-body text-xs flex items-center gap-1" style={{ color: T.green }}>
+          <CheckCircle2 size={13} /> Đã tải lên
+        </span>
+      )}
+      {status === "error" && (
+        <span className="f-body text-xs" style={{ color: T.red }}>{errMsg}</span>
+      )}
+    </div>
+  );
+}
+
+/* ============ LOGIN GATE ============ */
+function LoginGate({ onLogin }) {
+  const [pw, setPw] = useState("");
+  const [name, setName] = useState("");
+  const [err, setErr] = useState("");
+  const { config } = useAuthConfig();
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setErr("Nhập họ tên của bạn để hệ thống ghi nhận.");
+      return;
+    }
+    if (pw === config.adminPassword) {
+      onLogin(name.trim(), true);
+      return;
+    }
+    if (pw !== config.unitPassword) {
+      setErr("Mật khẩu không đúng. Liên hệ Ban quản lý ký túc xá để lấy mật khẩu.");
+      return;
+    }
+    onLogin(name.trim(), false);
+  };
+
+  return (
+    <div className="min-h-screen paper-tex flex items-center justify-center px-4 py-10">
+      <style>{FONT_STYLE}</style>
+      <ErrorBanner />
+      <form
+        onSubmit={submit}
+        className="relative w-full max-w-md overflow-hidden card-sheet"
+        style={{ background: "#fff", border: `1px solid ${T.paperDark}` }}
+      >
+        <div
+          className="f-mono text-center text-[10px] tracking-[0.25em] uppercase py-2"
+          style={{ background: T.red, color: "#fff" }}
+        >
+          Hệ thống quản lý ký túc xá
+        </div>
+        <div style={{ height: 3, background: T.gold }} />
+
+        <div className="relative px-8 pt-8 pb-8">
+          <CornerMarks inset={14} length={16} />
+          <div style={{ position: "absolute", top: -10, right: -18, pointerEvents: "none" }}>
+            <Seal size={150} opacity={0.06} />
+          </div>
+
+          <div className="relative flex flex-col items-center mb-6">
+            <Emblem size={92} />
+            <div className="f-mono text-[10.5px] tracking-[0.22em] uppercase mt-4" style={{ color: T.amberDark }}>
+              Trường Đại học Cảnh sát nhân dân
+            </div>
+            <div className="f-mono text-[9.5px] tracking-[0.18em] uppercase" style={{ color: T.inkSoft }}>
+              People's Police University
+            </div>
+            <h1 className="f-display text-2xl font-semibold text-center mt-2" style={{ color: T.green }}>
+              QUẢN LÝ KÝ TÚC XÁ
+            </h1>
+            <div className="flex items-center gap-2 my-3">
+              <span style={{ width: 24, height: 1, background: T.gold }} />
+              <span style={{ width: 5, height: 5, transform: "rotate(45deg)", background: T.gold }} />
+              <span style={{ width: 24, height: 1, background: T.gold }} />
+            </div>
+            <div className="f-body text-xs" style={{ color: T.inkSoft }}>Cổng truy cập nội bộ ký túc xá</div>
+          </div>
+
+          <div className="relative">
+            <Field label="Họ và tên" required>
+              <input className={inputCls} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
+            </Field>
+            <Field label="Mật khẩu (chung ký túc xá hoặc quản trị)">
+              <input type="password" className={inputCls} style={inputStyle} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
+            </Field>
+
+            {err && (
+              <div className="f-body text-xs mb-3 px-3 py-2 flex items-start gap-2" style={{ color: T.red, background: "#F7E3E6", borderLeft: `3px solid ${T.red}` }}>
+                {err}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="f-display w-full py-2.5 tracking-wide uppercase text-sm btn-press"
+              style={{ background: T.green, color: T.paper, boxShadow: "0 2px 6px rgba(19,31,25,0.3)" }}
+            >
+              Vào trang quản lý
+            </button>
+            <p className="f-body text-[11px] mt-4 text-center" style={{ color: T.inkSoft }}>
+              Dữ liệu trên trang này dùng chung cho toàn ký túc xá. Quyền thêm/xoá/sửa nội dung tuỳ theo vai trò được quản trị gán.
+            </p>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ============================================================
+   DỮ LIỆU DÙNG CHUNG: PHÒNG Ở, SINH VIÊN, TÀI SẢN, BẢO TRÌ
+   ============================================================ */
+const ROOM_STATUS = ["Trống", "Đang ở", "Đang bảo trì"];
+const GENDER_OPTIONS = ["Nam", "Nữ"];
+const NAM_HOC_OPTIONS = ["Năm 1", "Năm 2", "Năm 3", "Năm 4"];
+const ASSET_CATEGORY = ["Điện", "Nước", "Cơ sở vật chất"];
+const ASSET_STATUS = ["Tốt", "Hỏng", "Đang sửa", "Đã thanh lý"];
+const MAINT_STATUS = ["Chờ xử lý", "Đang xử lý", "Hoàn thành", "Từ chối"];
+const INSPECTION_CLASS = ["Tốt", "Khá", "Trung bình", "Vi phạm"];
+const NOTIFICATION_SCOPES = [
+  { key: "toan_ktx", label: "Toàn ký túc xá" },
+  { key: "toa_nha", label: "Theo tòa nhà" },
+  { key: "tang", label: "Theo tầng / khu vực" },
+  { key: "phong", label: "Theo phòng" },
+  { key: "khoa", label: "Theo khoá học" },
+];
+
+function classifyRoomInspection(score, hasViolation) {
+  if (hasViolation) return "Vi phạm";
+  const n = Number(score);
+  if (!Number.isFinite(n)) return "Trung bình";
+  if (n >= 9) return "Tốt";
+  if (n >= 7) return "Khá";
+  if (n >= 5) return "Trung bình";
+  return "Vi phạm";
+}
+
+function roomLabel(r) {
+  if (!r) return "—";
+  return `${r.building || "?"} - Phòng ${r.roomNumber || "?"}`;
+}
+function formatDob(dob) {
+  if (!dob) return "—";
+  const parts = String(dob).split("-");
+  if (parts.length !== 3) return dob;
+  const [y, m, d] = parts;
+  return `${d}/${m}/${y}`;
+}
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("vi-VN");
+  } catch { return iso; }
+}
+
+/* ============ NHẬP DỮ LIỆU TỪ ẢNH/TỆP (dùng chung khung cho Sinh viên) ============ */
+function guessStudentField(header) {
+  const h = String(header || "").toLowerCase();
+  if (/stt|số\s*thứ\s*tự/.test(h)) return "stt";
+  if (/mã\s*số|msv|mssv/.test(h)) return "msv";
+  if (/họ.*tên|^tên$|full\s*name|^name$/.test(h)) return "name";
+  if (/giới\s*tính|gender/.test(h)) return "gender";
+  if (/khoá|khoa\s*học|^khoa$/.test(h)) return "khoa";
+  if (/^lớp$|^lop$|class/.test(h)) return "lop";
+  if (/đại\s*đội|dai\s*doi/.test(h)) return "daiDoi";
+  if (/năm\s*học/.test(h)) return "namHoc";
+  if (/ngày\s*sinh|năm\s*sinh|dob|birth/.test(h)) return "dob";
+  if (/sđt|điện\s*thoại|phone|sdt/.test(h)) return "phone";
+  if (/phòng|room/.test(h)) return "roomNumber";
+  return "";
+}
+const STUDENT_IMPORT_FIELDS = [
+  { key: "", label: "— Bỏ qua cột này —" },
+  { key: "stt", label: "STT" },
+  { key: "msv", label: "Mã số SV" },
+  { key: "name", label: "Họ và tên" },
+  { key: "gender", label: "Giới tính" },
+  { key: "khoa", label: "Khoá học" },
+  { key: "lop", label: "Lớp" },
+  { key: "daiDoi", label: "Đại đội" },
+  { key: "namHoc", label: "Năm học" },
+  { key: "dob", label: "Ngày sinh" },
+  { key: "phone", label: "SĐT" },
+  { key: "roomNumber", label: "Số phòng (ghi chú)" },
+];
+function normalizeDobInput(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  if (/^\d{4}$/.test(s)) return `${s}-01-01`;
+  return s;
+}
+function normalizeGenderInput(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (/^n(ữ)?$|female|f/.test(s)) return "Nữ";
+  if (/^nam$|male|^m$/.test(s)) return "Nam";
+  return raw || "";
+}
+function parseCSVText(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; } }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c === "\r") { /* bỏ qua */ }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((c) => String(c).trim() !== ""));
+}
+let _xlsxLoadPromise = null;
+function loadXLSXLib() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxLoadPromise) return _xlsxLoadPromise;
+  _xlsxLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    script.onload = () => resolve(window.XLSX);
+    script.onerror = () => reject(new Error("Không tải được thư viện đọc Excel — kiểm tra kết nối mạng."));
+    document.head.appendChild(script);
+  });
+  return _xlsxLoadPromise;
+}
+
+function StudentImportPanel({ existingItems, onConfirm, onClose }) {
+  const [srcMode, setSrcMode] = useState("file"); // "file" | "image"
+
+  const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState([]);
+  const [hasHeader, setHasHeader] = useState(true);
+  const [colMap, setColMap] = useState([]);
+  const [fileErr, setFileErr] = useState("");
+  const [fileBusy, setFileBusy] = useState(false);
+
+  const handleFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setFileErr(""); setFileBusy(true);
+    try {
+      const isCsv = /\.csv$/i.test(file.name);
+      let rows = [];
+      if (isCsv) {
+        const text = await file.text();
+        rows = parseCSVText(text);
+      } else {
+        const XLSX = await loadXLSXLib();
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" })
+          .map((r) => r.map((c) => String(c ?? "")))
+          .filter((r) => r.some((c) => String(c).trim() !== ""));
+      }
+      if (rows.length === 0) { setFileErr("Không đọc được dữ liệu nào từ file này."); setFileBusy(false); return; }
+      const colCount = Math.max(...rows.map((r) => r.length));
+      const headerRow = rows[0] || [];
+      setColMap(Array.from({ length: colCount }, (_, i) => guessStudentField(headerRow[i])));
+      setRawRows(rows);
+      setFileName(file.name);
+      setSelectedRows({});
+    } catch (err) {
+      setFileErr(`Đọc file thất bại — ${err?.message || err}`);
+    }
+    setFileBusy(false);
+  };
+
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+  const mappedFileRows = dataRows.map((r) => {
+    const o = { stt: "", msv: "", name: "", gender: "", khoa: "", lop: "", daiDoi: "", namHoc: "", dob: "", phone: "", roomNumber: "" };
+    colMap.forEach((key, i) => { if (key && r[i] !== undefined) o[key] = String(r[i]).trim(); });
+    if (o.dob) o.dob = normalizeDobInput(o.dob);
+    if (o.gender) o.gender = normalizeGenderInput(o.gender);
+    return o;
+  });
+
+  const [imageUrl, setImageUrl] = useState("");
+  const [ocrRows, setOcrRows] = useState(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrErr, setOcrErr] = useState("");
+  const [ocrNotConfigured, setOcrNotConfigured] = useState(false);
+
+  const runOCR = async () => {
+    if (!imageUrl) return;
+    setOcrBusy(true); setOcrErr(""); setOcrNotConfigured(false); setOcrRows(null);
+    try {
+      const res = await fetch("/api/ocr-students", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl }),
+      });
+      if (res.status === 404) { setOcrNotConfigured(true); setOcrBusy(false); return; }
+      const data = await res.json();
+      if (!res.ok) {
+        if (data?.notConfigured) setOcrNotConfigured(true);
+        else setOcrErr(data?.error || "Đọc ảnh thất bại, thử lại.");
+        setOcrBusy(false);
+        return;
+      }
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      setOcrRows(rows.map((r) => ({
+        stt: String(r.stt ?? "").trim(),
+        msv: String(r.msv ?? "").trim(),
+        name: String(r.name ?? "").trim(),
+        gender: normalizeGenderInput(r.gender),
+        khoa: String(r.khoa ?? "").trim(),
+        lop: String(r.lop ?? "").trim(),
+        daiDoi: String(r.daiDoi ?? "").trim(),
+        namHoc: String(r.namHoc ?? "").trim(),
+        dob: normalizeDobInput(r.dob),
+        phone: String(r.phone ?? "").trim(),
+        roomNumber: String(r.roomNumber ?? "").trim(),
+      })));
+      setSelectedRows({});
+    } catch (err) {
+      setOcrNotConfigured(true);
+    }
+    setOcrBusy(false);
+  };
+
+  const editOcrRow = (idx, key, value) => {
+    setOcrRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [key]: value } : r)));
+  };
+
+  const previewRows = srcMode === "file" ? mappedFileRows : (ocrRows || []);
+  const [selectedRows, setSelectedRows] = useState({});
+  const existingMsvSet = new Set(existingItems.map((m) => normalizeName(m.msv)).filter(Boolean));
+  const existingNameSet = new Set(existingItems.map((m) => normalizeName(m.name)));
+  const isDup = (r) => (r.msv && existingMsvSet.has(normalizeName(r.msv))) || (!r.msv && r.name && existingNameSet.has(normalizeName(r.name)));
+
+  useEffect(() => {
+    const next = {};
+    previewRows.forEach((r, i) => { next[i] = Boolean(r.name) && !isDup(r); });
+    setSelectedRows(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mappedFileRows.length, ocrRows]);
+
+  const toggleRow = (i) => setSelectedRows((s) => ({ ...s, [i]: !s[i] }));
+  const checkedCount = Object.values(selectedRows).filter(Boolean).length;
+
+  const confirmImport = () => {
+    const chosen = previewRows.filter((r, i) => selectedRows[i] && r.name);
+    if (chosen.length === 0) return;
+    onConfirm(chosen.map((r, idx) => ({
+      id: Date.now() + idx,
+      stt: r.stt || "",
+      msv: r.msv || "",
+      name: r.name,
+      gender: r.gender || "Nam",
+      khoa: r.khoa || "",
+      lop: r.lop || "",
+      namHoc: r.namHoc || "Năm 1",
+      phone: r.phone || "",
+      dob: r.dob || "",
+      roomId: "",
+      bed: "",
+      status: "Chưa xếp phòng",
+      note: r.roomNumber ? `Ghi chú số phòng khi nhập: ${r.roomNumber}` : "",
+    })));
+  };
+
+  return (
+    <div className="stamp-border p-3 mb-3" style={{ background: "#fff" }}>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <span className="f-display text-[11.5px] uppercase tracking-wider" style={{ color: T.amberDark }}>
+          Nhập Sinh viên nội trú từ ảnh / tệp
+        </span>
+        <button onClick={onClose} title="Đóng"><X size={16} style={{ color: T.inkSoft }} /></button>
+      </div>
+
+      <div className="flex gap-2 mb-3">
+        <Btn size="sm" variant={srcMode === "file" ? "solid" : "outline"} onClick={() => setSrcMode("file")}>
+          <FileSpreadsheet size={13} /> Từ file Excel/CSV
+        </Btn>
+        <Btn size="sm" variant={srcMode === "image" ? "solid" : "outline"} onClick={() => setSrcMode("image")}>
+          <ImageIcon size={13} /> Từ ảnh chụp (AI đọc chữ)
+        </Btn>
+      </div>
+
+      {srcMode === "file" ? (
+        <div>
+          <p className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>
+            Chọn file Excel (.xlsx/.xls) hoặc CSV — đọc trực tiếp trong trình duyệt, không cần AI, chính xác 100%
+            theo đúng dữ liệu trong file. Sau khi đọc xong, bạn chọn cột nào ứng với thông tin nào rồi tick dòng cần lấy.
+          </p>
+          <label className="f-display text-[11px] uppercase tracking-wider px-3 py-1.5 inline-flex items-center gap-1.5 cursor-pointer btn-press" style={{ border: `1px solid ${T.green}`, color: T.green }}>
+            {fileBusy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            {fileBusy ? "Đang đọc file…" : "Chọn file từ máy"}
+            <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFilePicked} />
+          </label>
+          {fileName && <span className="f-body text-[11px] ml-2" style={{ color: T.inkSoft }}>Đã chọn: {fileName}</span>}
+          {fileErr && <div className="f-body text-xs mt-2" style={{ color: T.red }}>{fileErr}</div>}
+
+          {rawRows.length > 0 && (
+            <>
+              <label className="flex items-center gap-2 mt-3 f-body text-xs cursor-pointer" style={{ color: T.ink }}>
+                <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />
+                Dòng đầu tiên là tiêu đề cột (không lấy làm dữ liệu)
+              </label>
+
+              <div className="f-mono text-[10.5px] uppercase tracking-widest mt-3 mb-1" style={{ color: T.amberDark }}>Chọn cột nào ứng với thông tin nào</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
+                {colMap.map((val, i) => (
+                  <div key={i}>
+                    <div className="f-body text-[10px] truncate mb-0.5" style={{ color: T.inkSoft }} title={rawRows[0]?.[i]}>
+                      Cột {i + 1}{hasHeader && rawRows[0]?.[i] ? `: "${rawRows[0][i]}"` : ""}
+                    </div>
+                    <select
+                      className={inputCls}
+                      style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px" }}
+                      value={val}
+                      onChange={(e) => setColMap((cm) => cm.map((v, ci) => (ci === i ? e.target.value : v)))}
+                    >
+                      {STUDENT_IMPORT_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div>
+          <p className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>
+            Tải lên ảnh chụp danh sách sinh viên (chữ in hoặc viết tay) — hệ thống dùng AI đọc chữ (OCR) để lấy thông tin.
+            Tính năng này cần cấu hình API riêng trên máy chủ; nếu chưa cấu hình, hệ thống sẽ báo rõ bên dưới.
+          </p>
+          <UploadField onUploaded={(url) => { setImageUrl(url); setOcrRows(null); setOcrErr(""); setOcrNotConfigured(false); }} />
+          {imageUrl && (
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              <img src={imageUrl} alt="Ảnh danh sách" className="w-16 h-16 object-cover stamp-border" />
+              <Btn size="sm" onClick={runOCR} disabled={ocrBusy}>
+                {ocrBusy ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {ocrBusy ? "Đang đọc ảnh…" : "Đọc dữ liệu từ ảnh"}
+              </Btn>
+            </div>
+          )}
+          {ocrNotConfigured && (
+            <div className="f-body text-xs mt-3 p-2.5" style={{ background: "#F7E3E6", color: T.red, borderLeft: `3px solid ${T.red}` }}>
+              Chưa cấu hình tính năng đọc ảnh (OCR) trên máy chủ. Cần thêm file API <code>api/ocr-students.js</code> và
+              biến môi trường <code>ANTHROPIC_API_KEY</code> trong cài đặt dự án trên Vercel rồi triển khai lại.
+              Trong lúc chờ cấu hình, bạn có thể dùng cách "Từ file Excel/CSV" ở trên — làm được ngay, không cần AI.
+            </div>
+          )}
+          {ocrErr && <div className="f-body text-xs mt-2" style={{ color: T.red }}>{ocrErr}</div>}
+        </div>
+      )}
+
+      {previewRows.length > 0 && (
+        <>
+          <div className="flex items-center justify-between flex-wrap gap-2 mt-4 mb-1.5">
+            <span className="f-mono text-[11px] uppercase tracking-widest" style={{ color: T.amberDark }}>
+              Xem trước — tick chọn dòng cần lấy ({checkedCount}/{previewRows.length})
+            </span>
+          </div>
+          <div className="overflow-x-auto overflow-y-auto stamp-border" style={{ background: "#fff", maxHeight: 320 }}>
+            <table className="w-full text-xs f-body table-lines table-grid">
+              <thead>
+                <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                  <th className="px-2 py-1.5 w-8"></th>
+                  <th className="text-left px-2 py-1.5">STT</th>
+                  <th className="text-left px-2 py-1.5">Mã SV</th>
+                  <th className="text-left px-2 py-1.5 min-w-[110px]">Họ và tên</th>
+                  <th className="text-left px-2 py-1.5">Giới tính</th>
+                  <th className="text-left px-2 py-1.5">Khoá</th>
+                  <th className="text-left px-2 py-1.5">Lớp</th>
+                  <th className="text-left px-2 py-1.5">Năm học</th>
+                  <th className="text-left px-2 py-1.5">Ngày sinh</th>
+                  <th className="text-left px-2 py-1.5">SĐT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.map((r, i) => (
+                  <tr key={i} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-2 py-1.5 text-center"><input type="checkbox" checked={Boolean(selectedRows[i])} onChange={() => toggleRow(i)} /></td>
+                    {srcMode === "image" ? (
+                      <>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 44 }} value={r.stt} onChange={(e) => editOcrRow(i, "stt", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 70 }} value={r.msv} onChange={(e) => editOcrRow(i, "msv", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", minWidth: 110 }} value={r.name} onChange={(e) => editOcrRow(i, "name", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 60 }} value={r.gender} onChange={(e) => editOcrRow(i, "gender", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 55 }} value={r.khoa} onChange={(e) => editOcrRow(i, "khoa", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 70 }} value={r.lop} onChange={(e) => editOcrRow(i, "lop", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 70 }} value={r.namHoc} onChange={(e) => editOcrRow(i, "namHoc", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 90 }} value={r.dob} onChange={(e) => editOcrRow(i, "dob", e.target.value)} /></td>
+                        <td className="px-1 py-1"><input className={inputCls} style={{ ...inputStyle, fontSize: "11px", padding: "3px 5px", width: 90 }} value={r.phone} onChange={(e) => editOcrRow(i, "phone", e.target.value)} /></td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-2 py-1.5 f-mono">{r.stt || "—"}</td>
+                        <td className="px-2 py-1.5 f-mono">{r.msv || "—"}</td>
+                        <td className="px-2 py-1.5 font-medium">
+                          {r.name || <span className="italic" style={{ color: T.inkSoft }}>(thiếu tên — sẽ bị bỏ qua)</span>}
+                          {isDup(r) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.red }}>· Trùng đã có</span>}
+                        </td>
+                        <td className="px-2 py-1.5">{r.gender || "—"}</td>
+                        <td className="px-2 py-1.5 f-mono">{r.khoa || "—"}</td>
+                        <td className="px-2 py-1.5">{r.lop || "—"}</td>
+                        <td className="px-2 py-1.5">{r.namHoc || "—"}</td>
+                        <td className="px-2 py-1.5 f-mono">{formatDob(r.dob) || "—"}</td>
+                        <td className="px-2 py-1.5 f-mono">{r.phone || "—"}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <Btn onClick={confirmImport} disabled={checkedCount === 0}>
+              <CheckCircle2 size={14} /> Xác nhận, thêm {checkedCount} sinh viên
+            </Btn>
+            <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: TỔNG QUAN
+   ============================================================ */
+function DashboardTab({ perm }) {
+  const { items: rooms, loading: roomsLoading } = useSharedList("rooms");
+  const { items: students, loading: studentsLoading } = useSharedList("students");
+  const { items: maint, loading: maintLoading } = useSharedList("maintenance");
+  const { items: assets, loading: assetsLoading } = useSharedList("assets");
+
+  const loading = roomsLoading || studentsLoading || maintLoading || assetsLoading;
+
+  const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
+  const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
+  const totalStudents = students.length;
+  const occupiedCount = activeStudents.filter((s) => s.roomId).length;
+  const byStatus = ROOM_STATUS.reduce((acc, s) => {
+    acc[s] = rooms.filter((r) => (r.status || "Trống") === s).length;
+    return acc;
+  }, {});
+  const unassigned = activeStudents.filter((s) => !s.roomId).length;
+  const pendingMaint = maint.filter((m) => m.status === "Chờ xử lý" || m.status === "Đang xử lý").length;
+  const brokenAssets = assets.filter((a) => a.status === "Hỏng").length;
+
+  const StatCard = ({ icon: Icon, label, value, accent }) => (
+    <div className="stamp-border p-4 card-item" style={{ background: "#fff" }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="icon-badge" style={{ background: accent || T.green, color: "#fff" }}><Icon size={14} /></span>
+        <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.inkSoft }}>{label}</span>
+      </div>
+      <div className="f-display text-3xl font-semibold" style={{ color: T.green }}>{value}</div>
+    </div>
+  );
+
+  // Thống kê theo từng tòa nhà: số phòng, sức chứa, đang ở, còn trống, bảo trì
+  const buildings = [...new Set(rooms.map((r) => r.building || "Chưa rõ").filter(Boolean))];
+  const buildingStats = buildings.map((b) => {
+    const bRooms = rooms.filter((r) => (r.building || "Chưa rõ") === b);
+    const cap = bRooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
+    const occ = activeStudents.filter((s) => bRooms.some((r) => r.id === s.roomId)).length;
+    return {
+      building: b,
+      roomCount: bRooms.length,
+      capacity: cap,
+      occupied: occ,
+      free: bRooms.filter((r) => (r.status || "Trống") === "Trống").length,
+      maintenance: bRooms.filter((r) => (r.status || "Trống") === "Đang bảo trì").length,
+    };
+  });
+
+  return (
+    <div>
+      <SectionHeader icon={LayoutGrid} eyebrow="Tổng quan" title="Bảng điều khiển ký túc xá" />
+      {loading ? <LoadingRow /> : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} />
+            <StatCard icon={Building2} label="Tổng số phòng" value={rooms.length} />
+            <StatCard icon={BedDouble} label="Phòng đang sử dụng" value={byStatus["Đang ở"] || 0} accent={T.amberDark} />
+            <StatCard icon={DoorOpen} label="Phòng còn trống" value={byStatus["Trống"] || 0} accent={T.green} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard icon={Wrench} label="Phòng bảo trì" value={byStatus["Đang bảo trì"] || 0} accent={T.red} />
+            <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} />
+            <StatCard icon={AlertTriangle} label="Tài sản hỏng" value={brokenAssets} accent={T.red} />
+            <StatCard icon={AlertTriangle} label="SV chưa xếp phòng" value={unassigned} accent={T.amberDark} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Trạng thái phòng</div>
+              <div className="space-y-2">
+                {ROOM_STATUS.map((s) => (
+                  <div key={s} className="flex items-center justify-between f-body text-sm">
+                    <span style={{ color: T.ink }}>{s}</span>
+                    <span className="f-mono font-semibold" style={{ color: T.green }}>{byStatus[s] || 0}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                  <span style={{ color: T.inkSoft }}>Tổng chỗ ở</span>
+                  <span className="f-mono font-semibold" style={{ color: T.green }}>{totalCapacity}</span>
+                </div>
+              </div>
+            </div>
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
+              <div className="flex items-center justify-between f-body text-sm mb-1">
+                <span style={{ color: T.ink }}>Yêu cầu đang chờ / đang xử lý</span>
+                <span className="f-mono font-semibold" style={{ color: pendingMaint > 0 ? T.red : T.green }}>{pendingMaint}</span>
+              </div>
+              <div className="flex items-center justify-between f-body text-sm mb-1">
+                <span style={{ color: T.ink }}>Tổng số yêu cầu đã ghi nhận</span>
+                <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
+              </div>
+              <div className="flex items-center justify-between f-body text-sm">
+                <span style={{ color: T.ink }}>Tài sản hỏng / tổng tài sản</span>
+                <span className="f-mono font-semibold" style={{ color: brokenAssets > 0 ? T.red : T.green }}>{brokenAssets} / {assets.length}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="stamp-border p-4" style={{ background: "#fff" }}>
+            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Thống kê theo tòa nhà</div>
+            {buildingStats.length === 0 ? <EmptyState text="Chưa có dữ liệu tòa nhà / phòng." /> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm f-body table-lines">
+                  <thead>
+                    <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                      <th className="text-left px-3 py-2">Tòa nhà</th>
+                      <th className="text-left px-3 py-2">Số phòng</th>
+                      <th className="text-left px-3 py-2">Sức chứa</th>
+                      <th className="text-left px-3 py-2">Đang ở</th>
+                      <th className="text-left px-3 py-2">Còn trống</th>
+                      <th className="text-left px-3 py-2">Bảo trì</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buildingStats.map((b, i) => (
+                      <tr key={b.building} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                        <td className="px-3 py-2 font-medium" style={{ color: T.green }}>{b.building}</td>
+                        <td className="px-3 py-2 f-mono">{b.roomCount}</td>
+                        <td className="px-3 py-2 f-mono">{b.capacity}</td>
+                        <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{b.occupied}</td>
+                        <td className="px-3 py-2 f-mono" style={{ color: T.green }}>{b.free}</td>
+                        <td className="px-3 py-2 f-mono" style={{ color: b.maintenance > 0 ? T.red : T.inkSoft }}>{b.maintenance}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: DANH SÁCH PHÒNG (theo tòa nhà, khu vực, trạng thái sử dụng)
+   ============================================================ */
+function RoomForm({ initial, onCancel, onSave, warn }) {
+  const [form, setForm] = useState(initial);
+  useEffect(() => setForm(initial), [initial]);
+  return (
+    <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
+      <div className="md:col-span-3"><FormWarning message={warn} /></div>
+      <Field label="Toà nhà" required>
+        <input className={inputCls} style={inputStyle} value={form.building} onChange={(e) => setForm({ ...form, building: e.target.value })} placeholder="VD: Nhà A" />
+      </Field>
+      <Field label="Khu vực / Tầng">
+        <input className={inputCls} style={inputStyle} value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} placeholder="VD: Tầng 3, khu B" />
+      </Field>
+      <Field label="Số phòng" required>
+        <input className={inputCls} style={inputStyle} value={form.roomNumber} onChange={(e) => setForm({ ...form, roomNumber: e.target.value })} placeholder="VD: 301" />
+      </Field>
+      <Field label="Sức chứa (số giường)" required>
+        <input type="number" min="1" className={inputCls} style={inputStyle} value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} />
+      </Field>
+      <Field label="Giới tính phòng">
+        <select className={inputCls} style={inputStyle} value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+          {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </Field>
+      <Field label="Trạng thái sử dụng">
+        <select className={inputCls} style={inputStyle} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+          {ROOM_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </Field>
+      <div className="md:col-span-3">
+        <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+      </div>
+      <div className="md:col-span-3 flex gap-2">
+        <Btn onClick={() => onSave(form)}>Lưu</Btn>
+        <Btn variant="outline" onClick={onCancel}>Huỷ</Btn>
+      </div>
+    </div>
+  );
+}
+
+function RoomsTab({ perm }) {
+  const { items: rooms, setItems: setRooms, loading } = useSharedList("rooms");
+  const { items: students, setItems: setStudents } = useSharedList("students");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [warn, setWarn] = useState("");
+  const [filterBuilding, setFilterBuilding] = useState("");
+  const [filterArea, setFilterArea] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [mergeFrom, setMergeFrom] = useState(null);
+  const [mergeTarget, setMergeTarget] = useState("");
+
+  const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "" };
+
+  const occupantsOf = (roomId) => students.filter((s) => s.roomId === roomId && s.status !== "Đã trả phòng");
+
+  const validate = (form) => !form.building.trim() || !form.roomNumber.trim() || !String(form.capacity).trim();
+
+  const addRoom = async (form) => {
+    if (validate(form)) { setWarn("Vui lòng nhập đủ Toà nhà, Số phòng và Sức chứa trước khi lưu."); return; }
+    setWarn("");
+    await setRooms([...rooms, { id: Date.now(), ...form }]);
+    setShowForm(false);
+  };
+  const saveEdit = async (form) => {
+    if (validate(form)) { setWarn("Vui lòng nhập đủ Toà nhà, Số phòng và Sức chứa trước khi lưu."); return; }
+    setWarn("");
+    await setRooms(rooms.map((r) => (r.id === editingId ? { ...r, ...form } : r)));
+    setEditingId(null);
+  };
+  const removeRoom = async (id) => {
+    if (occupantsOf(id).length > 0) { reportGlobalError("Không thể xoá phòng đang có sinh viên ở — hãy chuyển hoặc trả phòng cho sinh viên trước."); return; }
+    await setRooms(rooms.filter((r) => r.id !== id));
+  };
+  const toggleStatus = async (r, status) => {
+    await setRooms(rooms.map((x) => (x.id === r.id ? { ...x, status } : x)));
+  };
+
+  const doMerge = async () => {
+    if (!mergeFrom || !mergeTarget) return;
+    const target = rooms.find((r) => r.id === Number(mergeTarget));
+    if (!target) return;
+    const moving = occupantsOf(mergeFrom.id);
+    const already = occupantsOf(target.id).length;
+    const room = target.capacity ? Number(target.capacity) : Infinity;
+    if (already + moving.length > room) {
+      reportGlobalError(`Phòng đích không đủ chỗ — còn trống ${Math.max(room - already, 0)} chỗ nhưng cần dồn ${moving.length} sinh viên.`);
+      return;
+    }
+    const movingIds = new Set(moving.map((s) => s.id));
+    await setStudents(students.map((s) => (movingIds.has(s.id) ? { ...s, roomId: target.id, bed: "" } : s)));
+    await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống" } : r)));
+    setMergeFrom(null);
+    setMergeTarget("");
+  };
+
+  const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
+  const areas = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))];
+  const filteredRooms = rooms.filter((r) =>
+    (!filterBuilding || r.building === filterBuilding) &&
+    (!filterArea || r.area === filterArea) &&
+    (!filterStatus || (r.status || "Trống") === filterStatus)
+  );
+  const grouped = filteredRooms.reduce((acc, r) => {
+    const k = r.building || "Chưa rõ toà nhà";
+    (acc[k] = acc[k] || []).push(r);
+    return acc;
+  }, {});
+  // Nhóm phụ theo tầng/khu vực trong mỗi toà nhà (Quản lý tầng)
+  const groupByArea = (list) => {
+    const g = list.reduce((acc, r) => {
+      const k = r.area || "Chưa rõ tầng/khu vực";
+      (acc[k] = acc[k] || []).push(r);
+      return acc;
+    }, {});
+    return Object.entries(g);
+  };
+
+  const statusColor = { "Trống": T.green, "Đang ở": T.amberDark, "Đang bảo trì": T.red };
+
+  return (
+    <div>
+      <SectionHeader compact icon={Building2} eyebrow={`Tổng số phòng: ${rooms.length}`} title="Danh sách phòng"
+        action={perm.canManage && (
+          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm phòng</Btn>
+        )} />
+
+      {perm.canManage && showForm && (
+        <RoomForm initial={blankForm} warn={warn} onCancel={() => setShowForm(false)} onSave={addRoom} />
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => { setFilterBuilding(e.target.value); setFilterArea(""); }}>
+          <option value="">— Tất cả toà nhà —</option>
+          {buildings.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterArea} onChange={(e) => setFilterArea(e.target.value)}>
+          <option value="">— Tất cả tầng / khu vực —</option>
+          {areas.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">— Tất cả trạng thái —</option>
+          {ROOM_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filteredRooms.length === 0 ? <EmptyState text="Chưa có phòng nào phù hợp." /> : (
+        <div className="space-y-6">
+          {Object.entries(grouped).map(([building, list]) => (
+            <div key={building}>
+              <div className="f-display text-sm uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: T.amberDark }}>
+                <ChevronRight size={14} /> {building}
+              </div>
+              {groupByArea(list).map(([area, areaList]) => (
+              <div key={area} className="mb-4 last:mb-0">
+                {groupByArea(list).length > 1 && (
+                  <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
+                )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {areaList.map((r) => {
+                  const occ = occupantsOf(r.id);
+                  const cap = Number(r.capacity) || 0;
+                  const isEditing = editingId === r.id;
+                  if (isEditing) {
+                    return (
+                      <div key={r.id} className="sm:col-span-2 lg:col-span-3">
+                        <RoomForm
+                          initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "" }}
+                          warn={warn}
+                          onCancel={() => setEditingId(null)}
+                          onSave={saveEdit}
+                        />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={r.id} className="stamp-border card-item p-3" style={{ background: "#fff" }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="cursor-pointer" onClick={() => setExpandedId((id) => (id === r.id ? null : r.id))}>
+                          <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
+                          <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{r.area || "—"} · {r.gender || "Nam"}</div>
+                        </div>
+                        <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status || "Trống"], color: "#fff" }}>
+                          {r.status || "Trống"}
+                        </span>
+                      </div>
+                      <div className="f-body text-xs mt-2" style={{ color: T.ink }}>
+                        Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
+                      </div>
+                      {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
+
+                      {expandedId === r.id && (
+                        <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                          <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>Sơ đồ giường</div>
+                          {cap > 0 ? (
+                            <div className="grid grid-cols-2 gap-1.5 mb-2">
+                              {Array.from({ length: cap }, (_, i) => i + 1).map((bedNo) => {
+                                const occByBed = occ.find((s) => String(s.bed) === String(bedNo));
+                                return (
+                                  <div
+                                    key={bedNo}
+                                    className="f-body text-[10.5px] px-2 py-1.5 rounded-sm flex items-center gap-1.5"
+                                    style={{
+                                      background: occByBed ? "#DCEAFC" : "rgba(31,51,40,0.05)",
+                                      border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
+                                    }}
+                                  >
+                                    <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
+                                    <span style={{ color: T.inkSoft }}>G{bedNo}:</span>
+                                    <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
+                                      {occByBed ? occByBed.name : "Trống"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>Chưa khai báo sức chứa để chia giường.</div>
+                          )}
+                          {occ.some((s) => !s.bed) && (
+                            <div className="mb-1">
+                              <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Chưa gán số giường</div>
+                              <ul className="space-y-0.5">
+                                {occ.filter((s) => !s.bed).map((s) => (
+                                  <li key={s.id} className="f-body text-[11.5px] flex items-center justify-between" style={{ color: T.ink }}>
+                                    <span>{s.name}</span>
+                                    <span className="f-mono text-[10px]" style={{ color: T.inkSoft }}>{s.msv}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {occ.length === 0 && cap === 0 && (
+                            <div className="f-body text-[11px] italic" style={{ color: T.inkSoft }}>Chưa có sinh viên nào.</div>
+                          )}
+                        </div>
+                      )}
+
+                      {perm.canManage && (
+                        <div className="flex items-center flex-wrap gap-2 mt-3">
+                          <button onClick={() => setEditingId(r.id)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                          <button onClick={() => removeRoom(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                          {r.status !== "Đang bảo trì" ? (
+                            <button className="f-mono text-[10px] underline" style={{ color: T.red }} onClick={() => toggleStatus(r, "Đang bảo trì")}>Đánh dấu bảo trì</button>
+                          ) : (
+                            <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
+                          )}
+                          {occ.length > 0 && (
+                            <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => { setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng…</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {mergeFrom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => setMergeFrom(null)}>
+          <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
+              Dồn phòng {roomLabel(mergeFrom)}
+            </div>
+            <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+              Toàn bộ {occupantsOf(mergeFrom.id).length} sinh viên đang ở phòng này sẽ được chuyển sang phòng đích bên dưới; phòng gốc sẽ chuyển về trạng thái Trống.
+            </p>
+            <Field label="Phòng đích" required>
+              <select className={inputCls} style={inputStyle} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+                <option value="">— Chọn phòng đích —</option>
+                {rooms.filter((r) => r.id !== mergeFrom.id).map((r) => (
+                  <option key={r.id} value={r.id}>{roomLabel(r)} ({occupantsOf(r.id).length}/{r.capacity || "—"})</option>
+                ))}
+              </select>
+            </Field>
+            <div className="flex gap-2 mt-2">
+              <Btn onClick={doMerge} disabled={!mergeTarget}>Xác nhận dồn phòng</Btn>
+              <Btn variant="outline" onClick={() => setMergeFrom(null)}>Huỷ</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: SINH VIÊN NỘI TRÚ & PHÒNG – GIƯỜNG
+   ============================================================ */
+function TransferModal({ student, rooms, students, onClose, onConfirm }) {
+  const [roomId, setRoomId] = useState(student.roomId || "");
+  const [bed, setBed] = useState(student.bed || "");
+  const [err, setErr] = useState("");
+
+  const occupantsOf = (rid) => students.filter((s) => s.roomId === rid && s.status !== "Đã trả phòng" && s.id !== student.id);
+  const chosenRoom = rooms.find((r) => r.id === Number(roomId));
+
+  const confirm = () => {
+    if (!roomId) { setErr("Vui lòng chọn phòng."); return; }
+    const room = rooms.find((r) => r.id === Number(roomId));
+    if (!room) return;
+    const occ = occupantsOf(room.id);
+    if (room.capacity && occ.length >= Number(room.capacity)) { setErr("Phòng đã đủ số chỗ, chọn phòng khác."); return; }
+    if (room.gender && student.gender && room.gender !== student.gender) { setErr(`Phòng này chỉ dành cho giới tính "${room.gender}", không khớp với sinh viên (${student.gender}).`); return; }
+    onConfirm(room.id, bed);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={onClose}>
+      <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+        <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
+          Chuyển phòng — {student.name}
+        </div>
+        <FormWarning message={err} />
+        <Field label="Phòng mới" required>
+          <select className={inputCls} style={inputStyle} value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+            <option value="">— Chọn phòng —</option>
+            {rooms.map((r) => (
+              <option key={r.id} value={r.id}>{roomLabel(r)} · {r.gender || "Nam"} ({occupantsOf(r.id).length}/{r.capacity || "—"})</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Số giường (tuỳ chọn)">
+          <input className={inputCls} style={inputStyle} value={bed} onChange={(e) => setBed(e.target.value)} placeholder="VD: 2" />
+        </Field>
+        {chosenRoom?.status === "Đang bảo trì" && (
+          <div className="f-body text-xs mb-2" style={{ color: T.red }}>⚠ Phòng này đang được đánh dấu bảo trì.</div>
+        )}
+        <div className="flex gap-2 mt-2">
+          <Btn onClick={confirm}>Xác nhận chuyển phòng</Btn>
+          <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const STUDENT_BLANK = { msv: "", name: "", gender: "Nam", khoa: "", lop: "", daiDoi: "", namHoc: "Năm 1", phone: "", dob: "", note: "" };
+
+function StudentsTab({ perm, user }) {
+  const { items: students, setItems: setStudents, loading } = useSharedList("students");
+  const { items: rooms } = useSharedList("rooms");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(STUDENT_BLANK);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [warn, setWarn] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterRoom, setFilterRoom] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+
+  const add = async () => {
+    if (!form.msv.trim() || !form.name.trim() || !form.gender.trim()) { setWarn("Vui lòng nhập đủ Mã số SV, Họ tên và Giới tính trước khi lưu."); return; }
+    if (students.some((s) => normalizeName(s.msv) === normalizeName(form.msv))) { setWarn(`Mã số SV "${form.msv}" đã tồn tại.`); return; }
+    setWarn("");
+    await setStudents([...students, { id: Date.now(), ...form, roomId: "", bed: "", status: "Chưa xếp phòng" }]);
+    setForm(STUDENT_BLANK);
+    setShowForm(false);
+  };
+  const remove = async (id) => setStudents(students.filter((s) => s.id !== id));
+
+  const startEdit = (s) => { setEditingId(s.id); setEditForm({ ...s }); };
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); };
+  const saveEdit = async () => {
+    if (!editForm.name.trim()) { setWarn("Vui lòng nhập Họ và tên."); return; }
+    await setStudents(students.map((s) => (s.id === editingId ? { ...editForm } : s)));
+    cancelEdit();
+  };
+
+  const checkout = async (s) => {
+    await setStudents(students.map((x) => (x.id === s.id ? { ...x, roomId: "", bed: "", status: "Đã trả phòng" } : x)));
+  };
+  const confirmTransfer = async (roomId, bed) => {
+    await setStudents(students.map((s) => (s.id === transferTarget.id ? { ...s, roomId, bed, status: "Đang ở" } : s)));
+    setTransferTarget(null);
+  };
+
+  const q = search.trim().toLowerCase();
+  const filtered = students.filter((s) => {
+    if (filterRoom && String(s.roomId) !== filterRoom) return false;
+    if (filterStatus && (s.status || "Chưa xếp phòng") !== filterStatus) return false;
+    if (!q) return true;
+    const room = rooms.find((r) => r.id === s.roomId);
+    const haystack = [s.msv, s.name, s.gender, s.khoa, s.lop, s.daiDoi, s.namHoc, s.phone, room ? roomLabel(room) : ""].join(" ").toLowerCase();
+    return haystack.includes(q);
+  });
+
+  const STATUS_ALL = ["Chưa xếp phòng", "Đang ở", "Đã trả phòng"];
+
+  return (
+    <div>
+      <SectionHeader compact icon={Users} eyebrow={`Tổng số sinh viên: ${students.length}`} title="Sinh viên nội trú"
+        action={perm.canManage && (
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Btn size="sm" variant="outline" onClick={() => setShowImport((s) => !s)}><Upload size={14} /> Nhập từ ảnh/tệp</Btn>
+            <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm sinh viên</Btn>
+          </div>
+        )} />
+
+      {perm.canManage && showImport && (
+        <StudentImportPanel
+          existingItems={students}
+          onClose={() => setShowImport(false)}
+          onConfirm={async (rows) => {
+            const filtered2 = rows.filter((r) => !students.some((s) => normalizeName(s.msv) === normalizeName(r.msv) && r.msv));
+            await setStudents([...students, ...filtered2]);
+            setShowImport(false);
+          }}
+        />
+      )}
+
+      {perm.canManage && showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-3"><FormWarning message={warn} /></div>
+          <Field label="Mã số SV" required><input className={inputCls} style={inputStyle} value={form.msv} onChange={(e) => setForm({ ...form, msv: e.target.value })} /></Field>
+          <Field label="Họ và tên" required><input className={inputCls} style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="Giới tính">
+            <select className={inputCls} style={inputStyle} value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+              {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </Field>
+          <Field label="Khoá học"><input className={inputCls} style={inputStyle} value={form.khoa} onChange={(e) => setForm({ ...form, khoa: e.target.value })} placeholder="VD: K10" /></Field>
+          <Field label="Lớp"><input className={inputCls} style={inputStyle} value={form.lop} onChange={(e) => setForm({ ...form, lop: e.target.value })} /></Field>
+          <Field label="Đại đội (nếu áp dụng)"><input className={inputCls} style={inputStyle} value={form.daiDoi} onChange={(e) => setForm({ ...form, daiDoi: e.target.value })} placeholder="VD: Đại đội 3" /></Field>
+          <Field label="Năm học">
+            <select className={inputCls} style={inputStyle} value={form.namHoc} onChange={(e) => setForm({ ...form, namHoc: e.target.value })}>
+              {NAM_HOC_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </Field>
+          <Field label="Ngày sinh"><input type="date" className={inputCls} style={inputStyle} value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} /></Field>
+          <Field label="SĐT"><input className={inputCls} style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+          <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+          <div className="md:col-span-3"><Btn onClick={add}>Lưu — sinh viên sẽ ở trạng thái "Chưa xếp phòng"</Btn></div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.inkSoft }} />
+          <input className={inputCls} style={{ ...inputStyle, paddingLeft: 30 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm theo tên, MSV, phòng…" />
+        </div>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterRoom} onChange={(e) => setFilterRoom(e.target.value)}>
+          <option value="">— Tất cả phòng —</option>
+          {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">— Tất cả trạng thái —</option>
+          {STATUS_ALL.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Không có sinh viên nào phù hợp." /> : (
+        <div className="overflow-x-auto overflow-y-auto stamp-border card-sheet" style={{ background: "#fff", maxHeight: 460 }}>
+          <table className="w-full f-body table-lines" style={{ fontSize: "12.5px" }}>
+            <thead>
+              <tr className="f-mono text-[9.5px] uppercase tracking-widest" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                <th className="text-left px-2.5 py-2">Mã SV</th>
+                <th className="text-left px-2.5 py-2 min-w-[110px]">Họ tên</th>
+                <th className="text-left px-2.5 py-2">Giới tính</th>
+                <th className="text-left px-2.5 py-2">Khoá/Lớp</th>
+                <th className="text-left px-2.5 py-2">Năm học</th>
+                <th className="text-left px-2.5 py-2">Phòng - Giường</th>
+                <th className="text-left px-2.5 py-2">Trạng thái</th>
+                <th className="px-2.5 py-2 w-24"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s, i) => {
+                const room = rooms.find((r) => r.id === s.roomId);
+                const isEditing = editingId === s.id;
+                if (isEditing) {
+                  return (
+                    <tr key={s.id}><td colSpan={8} className="p-2">
+                      <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
+                        <Field label="Mã số SV"><input className={inputCls} style={inputStyle} value={editForm.msv} onChange={(e) => setEditForm({ ...editForm, msv: e.target.value })} /></Field>
+                        <Field label="Họ và tên"><input className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></Field>
+                        <Field label="Giới tính">
+                          <select className={inputCls} style={inputStyle} value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}>
+                            {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Khoá học"><input className={inputCls} style={inputStyle} value={editForm.khoa} onChange={(e) => setEditForm({ ...editForm, khoa: e.target.value })} /></Field>
+                        <Field label="Lớp"><input className={inputCls} style={inputStyle} value={editForm.lop} onChange={(e) => setEditForm({ ...editForm, lop: e.target.value })} /></Field>
+                        <Field label="Đại đội"><input className={inputCls} style={inputStyle} value={editForm.daiDoi || ""} onChange={(e) => setEditForm({ ...editForm, daiDoi: e.target.value })} /></Field>
+                        <Field label="Năm học">
+                          <select className={inputCls} style={inputStyle} value={editForm.namHoc} onChange={(e) => setEditForm({ ...editForm, namHoc: e.target.value })}>
+                            {NAM_HOC_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Ngày sinh"><input type="date" className={inputCls} style={inputStyle} value={editForm.dob} onChange={(e) => setEditForm({ ...editForm, dob: e.target.value })} /></Field>
+                        <Field label="SĐT"><input className={inputCls} style={inputStyle} value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} /></Field>
+                        <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} /></Field>
+                        <div className="md:col-span-3 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
+                      </div>
+                    </td></tr>
+                  );
+                }
+                return (
+                  <tr key={s.id} onClick={() => setSelectedId((id) => (id === s.id ? null : s.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff", borderBottom: `1px solid ${T.paperDark}` }, selectedId === s.id)}>
+                    <td className="px-2.5 py-2 f-mono" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.msv || "—"}</td>
+                    <td className="px-2.5 py-2 font-bold text-[11px]" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.name}</td>
+                    <td className="px-2.5 py-2" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.gender || "—"}</td>
+                    <td className="px-2.5 py-2 f-mono" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.khoa || "—"} / {s.lop || "—"}</td>
+                    <td className="px-2.5 py-2" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.namHoc || "—"}</td>
+                    <td className="px-2.5 py-2 f-mono" style={{ borderRight: `1px solid ${T.paperDark}` }}>{room ? roomLabel(room) : "—"}{s.bed ? ` · G${s.bed}` : ""}</td>
+                    <td className="px-2.5 py-2" style={{ borderRight: `1px solid ${T.paperDark}` }}>
+                      <span className="f-mono text-[10px] uppercase px-1.5 py-0.5 rounded-sm" style={{
+                        background: s.status === "Đang ở" ? T.green : s.status === "Đã trả phòng" ? T.red : T.amberDark, color: "#fff",
+                      }}>{s.status || "Chưa xếp phòng"}</span>
+                    </td>
+                    <td className="px-2.5 py-2">
+                      {perm.canManage && (
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button onClick={(e) => { e.stopPropagation(); setTransferTarget(s); }} title="Chuyển phòng"><ArrowRightLeft size={13} style={{ color: T.amberDark }} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); startEdit(s); }} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                          {s.roomId && (
+                            <button onClick={(e) => { e.stopPropagation(); checkout(s); }} title="Trả phòng"><DoorOpen size={13} style={{ color: T.red }} /></button>
+                          )}
+                          <button onClick={(e) => { e.stopPropagation(); remove(s.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {transferTarget && (
+        <TransferModal student={transferTarget} rooms={rooms} students={students} onClose={() => setTransferTarget(null)} onConfirm={confirmTransfer} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: BỐ TRÍ SINH VIÊN TỰ ĐỘNG (giới tính, khoá học, năm học)
+   ============================================================ */
+function AssignmentTab({ perm }) {
+  const { items: students, setItems: setStudents, loading: studentsLoading } = useSharedList("students");
+  const { items: rooms, loading: roomsLoading } = useSharedList("rooms");
+  const [gender, setGender] = useState("");
+  const [khoa, setKhoa] = useState("");
+  const [namHoc, setNamHoc] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  const unassigned = students.filter((s) => !s.roomId && s.status !== "Đã trả phòng").filter((s) =>
+    (!gender || s.gender === gender) && (!khoa || s.khoa === khoa) && (!namHoc || s.namHoc === namHoc)
+  );
+
+  const khoaOptions = [...new Set(students.map((s) => s.khoa).filter(Boolean))];
+
+  const runAssignment = () => {
+    const roomsSorted = [...rooms]
+      .filter((r) => (r.status || "Trống") !== "Đang bảo trì")
+      .sort((a, b) => (a.building || "").localeCompare(b.building || "") || String(a.roomNumber || "").localeCompare(String(b.roomNumber || ""), undefined, { numeric: true }));
+
+    const occupied = {};
+    students.forEach((s) => { if (s.roomId && s.status !== "Đã trả phòng") occupied[s.roomId] = (occupied[s.roomId] || 0) + 1; });
+
+    const remaining = {};
+    roomsSorted.forEach((r) => { remaining[r.id] = Math.max((Number(r.capacity) || 0) - (occupied[r.id] || 0), 0); });
+
+    const groups = unassigned.reduce((acc, s) => {
+      const k = s.gender || "Nam";
+      (acc[k] = acc[k] || []).push(s);
+      return acc;
+    }, {});
+
+    const assignments = [];
+    const notPlaced = [];
+    Object.entries(groups).forEach(([g, list]) => {
+      const candidateRooms = roomsSorted.filter((r) => !r.gender || r.gender === g);
+      let ri = 0;
+      list.forEach((s) => {
+        while (ri < candidateRooms.length && remaining[candidateRooms[ri].id] <= 0) ri++;
+        if (ri >= candidateRooms.length) { notPlaced.push(s); return; }
+        const room = candidateRooms[ri];
+        assignments.push({ studentId: s.id, studentName: s.name, roomId: room.id, roomLabel: roomLabel(room) });
+        remaining[room.id] -= 1;
+      });
+    });
+
+    setPreview({ assignments, notPlaced });
+    setMsg("");
+  };
+
+  const confirmAssignment = async () => {
+    if (!preview || preview.assignments.length === 0) return;
+    const map = new Map(preview.assignments.map((a) => [a.studentId, a.roomId]));
+    await setStudents(students.map((s) => (map.has(s.id) ? { ...s, roomId: map.get(s.id), status: "Đang ở" } : s)));
+    setMsg(`Đã bố trí ${preview.assignments.length} sinh viên vào phòng.`);
+    setPreview(null);
+  };
+
+  const loading = studentsLoading || roomsLoading;
+
+  return (
+    <div>
+      <SectionHeader icon={LayoutGrid} eyebrow="Xếp phòng tự động" title="Bố trí sinh viên vào phòng" />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Hệ thống chỉ bố trí những sinh viên <b>chưa có phòng</b>, ưu tiên đúng giới tính quy định của từng phòng,
+        lấp đầy phòng theo thứ tự Toà nhà → Số phòng. Bạn có thể lọc trước theo Khoá học / Năm học nếu muốn xếp riêng từng đợt.
+      </p>
+
+      <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-4 gap-3" style={{ background: "#fff" }}>
+        <Field label="Giới tính">
+          <select className={inputCls} style={inputStyle} value={gender} onChange={(e) => setGender(e.target.value)}>
+            <option value="">— Tất cả —</option>
+            {GENDER_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </Field>
+        <Field label="Khoá học">
+          <select className={inputCls} style={inputStyle} value={khoa} onChange={(e) => setKhoa(e.target.value)}>
+            <option value="">— Tất cả —</option>
+            {khoaOptions.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </Field>
+        <Field label="Năm học">
+          <select className={inputCls} style={inputStyle} value={namHoc} onChange={(e) => setNamHoc(e.target.value)}>
+            <option value="">— Tất cả —</option>
+            {NAM_HOC_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </Field>
+        <div className="flex items-end">
+          <Btn onClick={runAssignment} disabled={loading || unassigned.length === 0}>
+            <LayoutGrid size={15} /> Chạy bố trí ({unassigned.length} SV)
+          </Btn>
+        </div>
+      </div>
+
+      {msg && <div className="f-body text-sm mb-4" style={{ color: T.green }}>{msg}</div>}
+
+      {preview && (
+        <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+          <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
+            Xem trước kết quả bố trí — {preview.assignments.length} sinh viên có thể xếp phòng
+          </div>
+          {preview.assignments.length === 0 ? (
+            <EmptyState text="Không tìm được phòng còn trống phù hợp." />
+          ) : (
+            <div className="overflow-x-auto stamp-border mb-3" style={{ background: "#fff", maxHeight: 320, overflowY: "auto" }}>
+              <table className="w-full text-xs f-body table-lines">
+                <thead>
+                  <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0 }}>
+                    <th className="text-left px-2.5 py-1.5">Sinh viên</th>
+                    <th className="text-left px-2.5 py-1.5">Phòng dự kiến</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.assignments.map((a) => (
+                    <tr key={a.studentId} style={{ borderBottom: `1px solid ${T.paperDark}` }}>
+                      <td className="px-2.5 py-1.5 font-medium">{a.studentName}</td>
+                      <td className="px-2.5 py-1.5 f-mono">{a.roomLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {preview.notPlaced.length > 0 && (
+            <div className="f-body text-xs mb-3" style={{ color: T.red }}>
+              ⚠ Không đủ chỗ cho {preview.notPlaced.length} sinh viên: {preview.notPlaced.map((s) => s.name).join(", ")}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Btn onClick={confirmAssignment} disabled={preview.assignments.length === 0}><CheckCircle2 size={14} /> Xác nhận, lưu kết quả bố trí</Btn>
+            <Btn variant="outline" onClick={() => setPreview(null)}>Huỷ</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: QUẢN LÝ QUÂN SỐ (danh sách đang ở / đã trả phòng, thống kê theo khoá/lớp/đại đội)
+   ============================================================ */
+function RosterTab({ perm }) {
+  const { items: students, loading } = useSharedList("students");
+  const { items: rooms } = useSharedList("rooms");
+  const [view, setView] = useState("dang_o"); // dang_o | tra_phong
+
+  const dangO = students.filter((s) => s.status !== "Đã trả phòng");
+  const traPhong = students.filter((s) => s.status === "Đã trả phòng");
+  const list = view === "dang_o" ? dangO : traPhong;
+
+  const groupCount = (arr, key) => arr.reduce((acc, s) => {
+    const k = (s[key] || "").trim() || "Chưa rõ";
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const byKhoa = groupCount(dangO, "khoa");
+  const byLop = groupCount(dangO, "lop");
+  const hasDaiDoi = dangO.some((s) => (s.daiDoi || "").trim());
+  const byDaiDoi = hasDaiDoi ? groupCount(dangO, "daiDoi") : null;
+
+  const StatBlock = ({ title, data }) => (
+    <div className="stamp-border p-4" style={{ background: "#fff" }}>
+      <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>{title}</div>
+      <div className="space-y-1.5 max-h-56 overflow-y-auto scrollbar-thin">
+        {Object.entries(data).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between f-body text-sm">
+            <span style={{ color: T.ink }}>{k}</span>
+            <span className="f-mono font-semibold" style={{ color: T.green }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <SectionHeader icon={Users} eyebrow="Quản lý" title="Quản lý quân số" />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <StatBlock title="Thống kê theo khoá" data={byKhoa} />
+        <StatBlock title="Thống kê theo lớp" data={byLop} />
+        {byDaiDoi ? <StatBlock title="Thống kê theo đại đội" data={byDaiDoi} /> : (
+          <div className="stamp-border p-4 flex items-center justify-center" style={{ background: "#fff" }}>
+            <span className="f-body text-xs italic text-center" style={{ color: T.inkSoft }}>Chưa có dữ liệu đại đội — có thể bổ sung khi thêm/sửa học viên.</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setView("dang_o")}
+          className="f-display text-xs uppercase tracking-wide px-3 py-1.5 rounded-sm btn-press"
+          style={{ background: view === "dang_o" ? T.green : "transparent", color: view === "dang_o" ? "#fff" : T.green, border: `1px solid ${T.green}` }}
+        >
+          Đang ở nội trú ({dangO.length})
+        </button>
+        <button
+          onClick={() => setView("tra_phong")}
+          className="f-display text-xs uppercase tracking-wide px-3 py-1.5 rounded-sm btn-press"
+          style={{ background: view === "tra_phong" ? T.red : "transparent", color: view === "tra_phong" ? "#fff" : T.red, border: `1px solid ${T.red}` }}
+        >
+          Đã trả phòng ({traPhong.length})
+        </button>
+      </div>
+
+      {loading ? <LoadingRow /> : list.length === 0 ? <EmptyState text="Không có học viên nào trong danh sách này." /> : (
+        <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
+          <table className="w-full text-sm f-body table-lines">
+            <thead>
+              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-left px-3 py-2">Mã SV</th>
+                <th className="text-left px-3 py-2">Họ tên</th>
+                <th className="text-left px-3 py-2">Khoá/Lớp</th>
+                <th className="text-left px-3 py-2">Phòng</th>
+                <th className="text-left px-3 py-2">Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((s, i) => {
+                const room = rooms.find((r) => r.id === s.roomId);
+                return (
+                  <tr key={s.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-3 py-2 f-mono">{s.msv || "—"}</td>
+                    <td className="px-3 py-2 font-medium">{s.name}</td>
+                    <td className="px-3 py-2 f-mono">{s.khoa || "—"} / {s.lop || "—"}</td>
+                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2">{s.status || "Chưa xếp phòng"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: TÀI SẢN & THIẾT BỊ TRONG PHÒNG (điện, nước, cơ sở vật chất)
+   ============================================================ */
+const ASSET_BLANK = { roomId: "", name: "", category: "Cơ sở vật chất", quantity: "1", status: "Tốt", note: "" };
+
+function AssetsTab({ perm, user }) {
+  const { items: assets, setItems: setAssets, loading } = useSharedList("assets");
+  const { items: rooms } = useSharedList("rooms");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(ASSET_BLANK);
+  const [warn, setWarn] = useState("");
+  const [filterRoom, setFilterRoom] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+
+  const add = async () => {
+    if (!form.roomId || !form.name.trim()) { setWarn("Vui lòng chọn Phòng và nhập Tên thiết bị/tài sản trước khi lưu."); return; }
+    setWarn("");
+    await setAssets([...assets, { id: Date.now(), ...form, roomId: Number(form.roomId), updatedAt: new Date().toISOString(), by: user }]);
+    setForm(ASSET_BLANK);
+    setShowForm(false);
+  };
+  const remove = async (id) => setAssets(assets.filter((a) => a.id !== id));
+  const startEdit = (a) => { setEditingId(a.id); setEditForm({ ...a }); };
+  const saveEdit = async () => {
+    await setAssets(assets.map((a) => (a.id === editingId ? { ...editForm, roomId: Number(editForm.roomId), updatedAt: new Date().toISOString() } : a)));
+    setEditingId(null); setEditForm(null);
+  };
+
+  const filtered = assets.filter((a) =>
+    (!filterRoom || String(a.roomId) === filterRoom) && (!filterCategory || a.category === filterCategory)
+  );
+
+  const checkInventory = async (id) => setAssets(assets.map((a) => (a.id === id ? { ...a, lastCheckedAt: new Date().toISOString(), lastCheckedBy: user } : a)));
+  const liquidate = async (id) => setAssets(assets.map((a) => (a.id === id ? { ...a, status: "Đã thanh lý", updatedAt: new Date().toISOString() } : a)));
+
+  const statusColor = { "Tốt": T.green, "Hỏng": T.red, "Đang sửa": T.amberDark, "Đã thanh lý": T.inkSoft };
+
+  return (
+    <div>
+      <SectionHeader compact icon={Boxes} eyebrow={`Tổng số mục: ${assets.length}`} title="Tài sản & thiết bị trong phòng"
+        action={perm.canMaintain && (
+          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm tài sản</Btn>
+        )} />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Ghi nhận tài sản/thiết bị theo từng phòng: hệ thống điện - nước, quạt, giường tủ, bàn ghế và các cơ sở vật chất khác.
+      </p>
+
+      {perm.canMaintain && showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-3"><FormWarning message={warn} /></div>
+          <Field label="Phòng" required>
+            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+              <option value="">— Chọn phòng —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+            </select>
+          </Field>
+          <Field label="Tên thiết bị / tài sản" required><input className={inputCls} style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="VD: Quạt trần, Vòi nước, Bóng đèn…" /></Field>
+          <Field label="Phân loại">
+            <select className={inputCls} style={inputStyle} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              {ASSET_CATEGORY.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Số lượng"><input type="number" min="1" className={inputCls} style={inputStyle} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></Field>
+          <Field label="Tình trạng">
+            <select className={inputCls} style={inputStyle} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              {ASSET_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+          <div className="md:col-span-3"><Btn onClick={add}>Lưu</Btn></div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterRoom} onChange={(e) => setFilterRoom(e.target.value)}>
+          <option value="">— Tất cả phòng —</option>
+          {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+          <option value="">— Tất cả phân loại —</option>
+          {ASSET_CATEGORY.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có tài sản/thiết bị nào phù hợp." /> : (
+        <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
+          <table className="w-full text-sm f-body table-lines">
+            <thead>
+              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-left px-3 py-2">Phòng</th>
+                <th className="text-left px-3 py-2">Tên thiết bị</th>
+                <th className="text-left px-3 py-2">Phân loại</th>
+                <th className="text-left px-3 py-2">SL</th>
+                <th className="text-left px-3 py-2">Tình trạng</th>
+                <th className="text-left px-3 py-2">Ghi chú</th>
+                <th className="text-left px-3 py-2">Kiểm kê lần cuối</th>
+                <th className="px-3 py-2 w-28"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((a, i) => {
+                const room = rooms.find((r) => r.id === a.roomId);
+                if (editingId === a.id) {
+                  return (
+                    <tr key={a.id}><td colSpan={8} className="p-2">
+                      <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
+                        <Field label="Phòng">
+                          <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
+                            {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Tên thiết bị"><input className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></Field>
+                        <Field label="Phân loại">
+                          <select className={inputCls} style={inputStyle} value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>
+                            {ASSET_CATEGORY.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Số lượng"><input type="number" className={inputCls} style={inputStyle} value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} /></Field>
+                        <Field label="Tình trạng">
+                          <select className={inputCls} style={inputStyle} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                            {ASSET_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={editForm.note} onChange={(e) => setEditForm({ ...editForm, note: e.target.value })} /></Field>
+                        <div className="md:col-span-3 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={() => setEditingId(null)}>Huỷ</Btn></div>
+                      </div>
+                    </td></tr>
+                  );
+                }
+                return (
+                  <tr key={a.id} onClick={() => setSelectedId((id) => (id === a.id ? null : a.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === a.id)}>
+                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2 font-medium">{a.name}</td>
+                    <td className="px-3 py-2">{a.category}</td>
+                    <td className="px-3 py-2 f-mono">{a.quantity || 1}</td>
+                    <td className="px-3 py-2">
+                      <span className="f-mono text-[10px] uppercase px-1.5 py-0.5 rounded-sm" style={{ background: statusColor[a.status] || T.green, color: "#fff" }}>{a.status}</span>
+                    </td>
+                    <td className="px-3 py-2" style={{ color: T.inkSoft }}>{a.note}</td>
+                    <td className="px-3 py-2 f-mono text-[11px]" style={{ color: T.inkSoft }}>
+                      {a.lastCheckedAt ? `${formatDateTime(a.lastCheckedAt)}${a.lastCheckedBy ? ` · ${a.lastCheckedBy}` : ""}` : "Chưa kiểm kê"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {perm.canMaintain && (
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button onClick={(e) => { e.stopPropagation(); checkInventory(a.id); }} title="Đánh dấu đã kiểm kê"><CheckCircle2 size={13} style={{ color: T.amberDark }} /></button>
+                          {a.status !== "Đã thanh lý" && (
+                            <button onClick={(e) => { e.stopPropagation(); liquidate(a.id); }} title="Thanh lý tài sản"><AlertTriangle size={13} style={{ color: T.red }} /></button>
+                          )}
+                          <button onClick={(e) => { e.stopPropagation(); startEdit(a); }} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); remove(a.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: QUẢN LÝ BẢO TRÌ (sinh viên gửi yêu cầu, kỹ thuật cập nhật trạng thái)
+   ============================================================ */
+function MaintenanceTab({ perm, user }) {
+  const { items: requests, setItems: setRequests, loading } = useSharedList("maintenance");
+  const { items: rooms } = useSharedList("rooms");
+  const { items: permissions } = useSharedList("permissions");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ roomId: "", title: "", description: "", imageUrl: "" });
+  const [warn, setWarn] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+  const [noteDraft, setNoteDraft] = useState({});
+  const [assignDraft, setAssignDraft] = useState({});
+
+  const technicians = permissions.filter((p) => p.role === "ky_thuat").map((p) => p.name);
+
+  const submit = async () => {
+    if (!form.roomId || !form.title.trim()) { setWarn("Vui lòng chọn Phòng và nhập Nội dung yêu cầu trước khi gửi."); return; }
+    setWarn("");
+    await setRequests([
+      { id: Date.now(), roomId: Number(form.roomId), title: form.title, description: form.description, imageUrl: form.imageUrl, reporterName: user, status: "Chờ xử lý", createdAt: new Date().toISOString(), technicianNote: "", assignedTo: "" },
+      ...requests,
+    ]);
+    setForm({ roomId: "", title: "", description: "", imageUrl: "" });
+    setShowForm(false);
+  };
+  const remove = async (id) => setRequests(requests.filter((r) => r.id !== id));
+  const updateStatus = async (id, status) => {
+    await setRequests(requests.map((r) => (r.id === id ? { ...r, status } : r)));
+  };
+  const saveNote = async (id) => {
+    await setRequests(requests.map((r) => (r.id === id ? { ...r, technicianNote: noteDraft[id] ?? r.technicianNote } : r)));
+  };
+  const saveAssign = async (id) => {
+    await setRequests(requests.map((r) => (r.id === id ? { ...r, assignedTo: assignDraft[id] ?? r.assignedTo } : r)));
+  };
+
+  const canDelete = (r) => perm.canMaintain || perm.isOwner(r.reporterName);
+  const filtered = filterStatus ? requests.filter((r) => r.status === filterStatus) : requests;
+  const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
+
+  return (
+    <div>
+      <SectionHeader compact icon={Wrench} eyebrow={`Tổng số yêu cầu: ${requests.length}`} title="Quản lý bảo trì"
+        action={<Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi yêu cầu sửa chữa</Btn>} />
+
+      {showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-2"><FormWarning message={warn} /></div>
+          <Field label="Phòng" required>
+            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+              <option value="">— Chọn phòng —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+            </select>
+          </Field>
+          <Field label="Nội dung yêu cầu" required><input className={inputCls} style={inputStyle} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="VD: Hỏng bóng đèn, rò rỉ nước…" /></Field>
+          <div className="md:col-span-2">
+            <Field label="Mô tả chi tiết"><textarea rows={3} className={inputCls} style={inputStyle} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+          </div>
+          <div className="md:col-span-2">
+            <Field label="Ảnh minh hoạ (tuỳ chọn)">
+              <UploadField onUploaded={(url) => setForm((f) => ({ ...f, imageUrl: url }))} />
+              {form.imageUrl && <img src={form.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
+            </Field>
+          </div>
+          <div className="md:col-span-2"><Btn onClick={submit}>Gửi yêu cầu</Btn></div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">— Tất cả trạng thái —</option>
+          {MAINT_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có yêu cầu bảo trì nào." /> : (
+        <div className="space-y-3">
+          {filtered.map((r) => {
+            const room = rooms.find((x) => x.id === r.roomId);
+            return (
+              <div key={r.id} onClick={() => setSelectedId((id) => (id === r.id ? null : r.id))} className="stamp-border p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === r.id)}>
+                <div className="flex items-start justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{r.title}</div>
+                    <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
+                      {room ? roomLabel(room) : "—"} · Người gửi: {r.reporterName} · {formatDateTime(r.createdAt)}
+                    </div>
+                  </div>
+                  <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status] || T.green, color: "#fff" }}>{r.status}</span>
+                </div>
+                {r.description && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{r.description}</div>}
+                {r.imageUrl && <img src={r.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
+
+                {perm.canMaintain && (
+                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Phân công kỹ thuật:</span>
+                    <input
+                      list="technician-names"
+                      className={inputCls}
+                      style={{ ...inputStyle, fontSize: "12px", width: 200 }}
+                      placeholder="Tên người phụ trách…"
+                      value={assignDraft[r.id] ?? r.assignedTo ?? ""}
+                      onChange={(e) => setAssignDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                    />
+                    <datalist id="technician-names">
+                      {technicians.map((t) => <option key={t} value={t} />)}
+                    </datalist>
+                    <Btn size="sm" variant="outline" onClick={() => saveAssign(r.id)}>Lưu</Btn>
+                  </div>
+                )}
+                {!perm.canMaintain && r.assignedTo && (
+                  <div className="f-body text-xs mt-2" style={{ color: T.inkSoft }}>Phụ trách: <b style={{ color: T.ink }}>{r.assignedTo}</b></div>
+                )}
+
+                {perm.canMaintain && (
+                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Cập nhật trạng thái:</span>
+                    {MAINT_STATUS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => updateStatus(r.id, s)}
+                        className="f-display text-[10px] uppercase tracking-wide px-2 py-1 rounded-sm btn-press"
+                        style={{ background: r.status === s ? (statusColor[s] || T.green) : "transparent", color: r.status === s ? "#fff" : T.green, border: `1px solid ${statusColor[s] || T.green}` }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {perm.canMaintain && (
+                  <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      className={inputCls}
+                      style={{ ...inputStyle, fontSize: "12px" }}
+                      placeholder="Ghi chú của bộ phận kỹ thuật…"
+                      value={noteDraft[r.id] ?? r.technicianNote ?? ""}
+                      onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                    />
+                    <Btn size="sm" onClick={() => saveNote(r.id)}>Lưu ghi chú</Btn>
+                  </div>
+                )}
+                {!perm.canMaintain && r.technicianNote && (
+                  <div className="f-body text-xs mt-2 italic" style={{ color: T.inkSoft }}>Ghi chú kỹ thuật: {r.technicianNote}</div>
+                )}
+
+                {canDelete(r) && (
+                  <div className="mt-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => remove(r.id)} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá yêu cầu</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: QUẢN LÝ ĐIỆN - NƯỚC (nhập chỉ số, thống kê tiêu thụ, báo cáo theo tháng)
+   ============================================================ */
+function UtilitiesTab({ perm, user }) {
+  const { items: records, setItems: setRecords, loading } = useSharedList("utilities");
+  const { items: rooms } = useSharedList("rooms");
+  const [showForm, setShowForm] = useState(false);
+  const blank = { roomId: "", month: new Date().toISOString().slice(0, 7), electricityIndex: "", waterIndex: "" };
+  const [form, setForm] = useState(blank);
+  const [warn, setWarn] = useState("");
+  const [filterMonth, setFilterMonth] = useState("");
+
+  const submit = async () => {
+    if (!form.roomId || !form.month) { setWarn("Vui lòng chọn Phòng và Tháng trước khi lưu."); return; }
+    if (records.some((r) => String(r.roomId) === String(form.roomId) && r.month === form.month)) {
+      setWarn("Phòng này đã có chỉ số điện/nước cho tháng đã chọn. Hãy sửa bản ghi cũ thay vì thêm mới.");
+      return;
+    }
+    setWarn("");
+    await setRecords([
+      { id: Date.now(), roomId: Number(form.roomId), month: form.month, electricityIndex: Number(form.electricityIndex) || 0, waterIndex: Number(form.waterIndex) || 0, by: user, createdAt: new Date().toISOString() },
+      ...records,
+    ]);
+    setForm(blank);
+    setShowForm(false);
+  };
+  const remove = async (id) => setRecords(records.filter((r) => r.id !== id));
+
+  // Tính tiêu thụ = chỉ số tháng này - chỉ số tháng liền trước (cùng phòng)
+  const withUsage = records.map((r) => {
+    const prevRecords = records
+      .filter((x) => String(x.roomId) === String(r.roomId) && x.month < r.month)
+      .sort((a, b) => String(b.month).localeCompare(String(a.month)));
+    const prev = prevRecords[0];
+    return {
+      ...r,
+      elecUsage: prev ? r.electricityIndex - prev.electricityIndex : null,
+      waterUsage: prev ? r.waterIndex - prev.waterIndex : null,
+    };
+  });
+
+  const months = [...new Set(records.map((r) => r.month))].sort().reverse();
+  const filtered = withUsage.filter((r) => !filterMonth || r.month === filterMonth).sort((a, b) => String(b.month).localeCompare(String(a.month)));
+
+  const monthTotal = (month) => {
+    const rows = withUsage.filter((r) => r.month === month);
+    return {
+      elec: rows.reduce((s, r) => s + (r.elecUsage || 0), 0),
+      water: rows.reduce((s, r) => s + (r.waterUsage || 0), 0),
+      count: rows.length,
+    };
+  };
+
+  return (
+    <div>
+      <SectionHeader compact icon={Zap} eyebrow={`Tổng số bản ghi: ${records.length}`} title="Quản lý điện - nước"
+        action={perm.canMaintain && (
+          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Nhập chỉ số</Btn>
+        )} />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Nhập chỉ số điện - nước hàng tháng theo từng phòng. Hệ thống tự tính mức tiêu thụ so với tháng liền trước.
+      </p>
+
+      {perm.canMaintain && showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-2"><FormWarning message={warn} /></div>
+          <Field label="Phòng" required>
+            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+              <option value="">— Chọn phòng —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+            </select>
+          </Field>
+          <Field label="Tháng" required>
+            <input type="month" className={inputCls} style={inputStyle} value={form.month} onChange={(e) => setForm({ ...form, month: e.target.value })} />
+          </Field>
+          <Field label="Chỉ số điện (kWh)" required>
+            <input type="number" className={inputCls} style={inputStyle} value={form.electricityIndex} onChange={(e) => setForm({ ...form, electricityIndex: e.target.value })} />
+          </Field>
+          <Field label="Chỉ số nước (m³)" required>
+            <input type="number" className={inputCls} style={inputStyle} value={form.waterIndex} onChange={(e) => setForm({ ...form, waterIndex: e.target.value })} />
+          </Field>
+          <div className="md:col-span-2"><Btn onClick={submit}>Lưu chỉ số</Btn></div>
+        </div>
+      )}
+
+      {months.length > 0 && (
+        <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+          <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Thống kê tiêu thụ theo tháng</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm f-body table-lines">
+              <thead>
+                <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                  <th className="text-left px-3 py-2">Tháng</th>
+                  <th className="text-left px-3 py-2">Số phòng có dữ liệu</th>
+                  <th className="text-left px-3 py-2">Tổng điện tiêu thụ (kWh)</th>
+                  <th className="text-left px-3 py-2">Tổng nước tiêu thụ (m³)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {months.map((m, i) => {
+                  const t = monthTotal(m);
+                  return (
+                    <tr key={m} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                      <td className="px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{m}</td>
+                      <td className="px-3 py-2 f-mono">{t.count}</td>
+                      <td className="px-3 py-2 f-mono">{t.elec}</td>
+                      <td className="px-3 py-2 f-mono">{t.water}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+          <option value="">— Tất cả các tháng —</option>
+          {months.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
+        <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
+          <table className="w-full text-sm f-body table-lines">
+            <thead>
+              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-left px-3 py-2">Phòng</th>
+                <th className="text-left px-3 py-2">Tháng</th>
+                <th className="text-left px-3 py-2">Chỉ số điện</th>
+                <th className="text-left px-3 py-2">Điện tiêu thụ</th>
+                <th className="text-left px-3 py-2">Chỉ số nước</th>
+                <th className="text-left px-3 py-2">Nước tiêu thụ</th>
+                <th className="px-3 py-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => {
+                const room = rooms.find((x) => x.id === r.roomId);
+                return (
+                  <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2 f-mono">{r.month}</td>
+                    <td className="px-3 py-2 f-mono">{r.electricityIndex}</td>
+                    <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
+                    <td className="px-3 py-2 f-mono">{r.waterIndex}</td>
+                    <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
+                    <td className="px-3 py-2 text-right">
+                      {perm.canMaintain && <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============ TAB: TÀI LIỆU - VĂN BẢN KÝ TÚC XÁ ============ */
+function DocsTab({ user, perm }) {
+  const { items, setItems, loading } = useSharedList("docs");
+  const [form, setForm] = useState({ subject: "", title: "", url: "" });
+  const [showForm, setShowForm] = useState(false);
+  const [warn, setWarn] = useState("");
+
+  const add = async () => {
+    if (!form.title.trim()) { setWarn("Vui lòng nhập Tên tài liệu trước khi lưu."); return; }
+    setWarn("");
+    await setItems([{ id: Date.now(), ...form, by: user, date: new Date().toISOString() }, ...items]);
+    setForm({ subject: "", title: "", url: "" });
+    setShowForm(false);
+  };
+  const remove = async (id) => setItems(items.filter((i) => i.id !== id));
+  const [selectedId, setSelectedId] = useState(null);
+  const toggleSelect = (id) => setSelectedId((s) => (s === id ? null : id));
+
+  const bySubject = items.reduce((acc, d) => {
+    const k = d.subject || "Khác";
+    (acc[k] = acc[k] || []).push(d);
+    return acc;
+  }, {});
+
+  return (
+    <div>
+      <SectionHeader icon={FolderOpen} eyebrow="Kho lưu trữ" title="Tài liệu - Văn bản ký túc xá"
+        action={<Btn onClick={() => setShowForm((s) => !s)}><Plus size={16} /> Thêm tài liệu</Btn>} />
+
+      {showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-3"><FormWarning message={warn} /></div>
+          <Field label="Nhóm văn bản"><input className={inputCls} style={inputStyle} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="VD: Nội quy, Biểu mẫu…" /></Field>
+          <Field label="Tên tài liệu" required><input className={inputCls} style={inputStyle} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+          <Field label="Đường dẫn (link)">
+            <input className={inputCls} style={inputStyle} value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+            <UploadField onUploaded={(url) => setForm((f) => ({ ...f, url }))} />
+          </Field>
+          <div className="md:col-span-3"><Btn onClick={add}>Lưu</Btn></div>
+        </div>
+      )}
+
+      {loading ? <LoadingRow /> : items.length === 0 ? <EmptyState text="Chưa có tài liệu nào." /> : (
+        <div className="space-y-5">
+          {Object.entries(bySubject).map(([subj, docs]) => (
+            <div key={subj}>
+              <div className="f-display text-sm uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: T.amberDark }}><ChevronRight size={14} />{subj}</div>
+              <div className="space-y-2">
+                {docs.map((d) => (
+                  <div key={d.id} onClick={() => toggleSelect(d.id)} className="flex items-center justify-between p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === d.id)}>
+                    <div>
+                      <div className="f-body text-sm font-medium" style={{ color: T.ink }}>{d.title}</div>
+                      {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="f-mono text-xs underline break-all" style={{ color: T.green }}>{d.url}</a>}
+                    </div>
+                    {(perm.canManage || perm.isOwner(d.by)) && <button onClick={() => remove(d.id)}><Trash2 size={14} style={{ color: T.red }} /></button>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============ SAO LƯU & KHÔI PHỤC ============ */
+const ALL_DATA_KEYS = ["rooms", "students", "assets", "maintenance", "docs", "permissions", "authConfig", "managerInfo"];
+
+function BackupSection() {
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const exportBackup = async () => {
+    setBusy(true);
+    setStatus("Đang gom dữ liệu…");
+    try {
+      const data = {};
+      for (const k of ALL_DATA_KEYS) {
+        try {
+          const snap = await getDoc(doc(db, DATA_NS, k));
+          data[k] = snap.exists() && snap.data().value ? JSON.parse(snap.data().value) : [];
+        } catch (e) {
+          data[k] = [];
+        }
+      }
+      const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sao-luu-ktx-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus("Đã tải file sao lưu về máy.");
+    } catch (e) {
+      setStatus("Lỗi khi sao lưu, thử lại nhé.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restoreBackup = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setStatus("Đang khôi phục dữ liệu…");
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const data = parsed.data || parsed;
+      let count = 0;
+      for (const k of ALL_DATA_KEYS) {
+        if (data[k] !== undefined) {
+          await setDoc(doc(db, DATA_NS, k), { value: JSON.stringify(data[k]) });
+          count++;
+        }
+      }
+      setStatus(`Đã khôi phục ${count} mục dữ liệu.`);
+    } catch (e) {
+      setStatus("File không hợp lệ hoặc lỗi khi khôi phục.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+      <div className="f-display text-sm uppercase tracking-wider mb-2" style={{ color: T.amberDark }}>Sao lưu & khôi phục dữ liệu</div>
+      <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+        Dữ liệu trang này đã được lưu trữ dùng chung trên Firebase, đồng bộ theo thời gian thực và không mất khi đăng xuất.
+        Mục này chỉ để tải thêm một bản sao ra máy tính phòng trường hợp cần lưu trữ ngoài hoặc khôi phục lại.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <Btn onClick={exportBackup} disabled={busy}><Paperclip size={16} /> Xuất file sao lưu (.json)</Btn>
+        <label className="f-display text-sm tracking-wide uppercase px-4 py-2 flex items-center gap-2 cursor-pointer" style={{ background: "transparent", color: T.green, border: `1.5px solid ${T.green}` }}>
+          <Plus size={16} /> Nhập file khôi phục
+          <input type="file" accept="application/json" className="hidden" disabled={busy}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) restoreBackup(f); }} />
+        </label>
+      </div>
+      {status && <div className="f-body text-xs mt-3" style={{ color: T.inkSoft }}>{status}</div>}
+    </div>
+  );
+}
+
+/* ============ TAB: ĐỔI MẬT KHẨU ============ */
+function PasswordTab({ user, perm }) {
+  const { config, setConfig, loading } = useAuthConfig();
+  const [unitPw, setUnitPw] = useState("");
+  const [adminPw, setAdminPw] = useState("");
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [warn, setWarn] = useState("");
+
+  useEffect(() => {
+    setUnitPw(config.unitPassword);
+    setAdminPw(config.adminPassword);
+  }, [config.unitPassword, config.adminPassword]);
+
+  const saveAdmin = async () => {
+    if (!unitPw.trim() || !adminPw.trim()) { setWarn("Vui lòng nhập đủ cả Mật khẩu chung ký túc xá và Mật khẩu quản trị trước khi lưu."); return; }
+    setWarn("");
+    setSaving(true);
+    const ok = await setConfig({ unitPassword: unitPw.trim(), adminPassword: adminPw.trim() });
+    setSaving(false);
+    setStatus(ok ? "Đã lưu mật khẩu mới. Áp dụng ngay từ lần đăng nhập tiếp theo." : "Lưu thất bại, thử lại nhé.");
+    setTimeout(() => setStatus(""), 4000);
+  };
+
+  return (
+    <div>
+      <SectionHeader icon={KeyRound} eyebrow="Bảo mật" title="Đổi mật khẩu" />
+      {loading ? <LoadingRow /> : (
+        <div className="stamp-border p-4" style={{ background: "#fff" }}>
+          <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+            Bạn là Quản trị — đổi được mật khẩu chung ký túc xá và mật khẩu quản trị. Mật khẩu mới áp dụng ngay từ lần
+            đăng nhập tiếp theo của mọi người.
+          </p>
+          <FormWarning message={warn} />
+          <Field label="Mật khẩu chung ký túc xá (dùng để đăng nhập thường)" required>
+            <PasswordInput value={unitPw} onChange={(e) => setUnitPw(e.target.value)} />
+          </Field>
+          <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
+            <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
+          </Field>
+          <Btn onClick={saveAdmin} disabled={saving}>{saving ? "Đang lưu…" : "Lưu mật khẩu"}</Btn>
+          {status && <div className="f-body text-xs mt-3" style={{ color: T.green }}>{status}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: QUẢN LÝ NỘI VỤ PHÒNG (chấm điểm vệ sinh, kiểm tra, vi phạm, xếp loại)
+   ============================================================ */
+function InspectionTab({ perm, user }) {
+  const { items: inspections, setItems: setInspections, loading } = useSharedList("inspections");
+  const { items: rooms } = useSharedList("rooms");
+  const [showForm, setShowForm] = useState(false);
+  const blank = { roomId: "", date: new Date().toISOString().slice(0, 10), hygieneScore: "10", violations: "", note: "" };
+  const [form, setForm] = useState(blank);
+  const [warn, setWarn] = useState("");
+  const [filterBuilding, setFilterBuilding] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+
+  const submit = async () => {
+    if (!form.roomId) { setWarn("Vui lòng chọn phòng trước khi lưu."); return; }
+    setWarn("");
+    const classification = classifyRoomInspection(form.hygieneScore, Boolean(form.violations.trim()));
+    await setInspections([
+      { id: Date.now(), roomId: Number(form.roomId), date: form.date, hygieneScore: Number(form.hygieneScore) || 0, violations: form.violations, classification, note: form.note, inspector: user },
+      ...inspections,
+    ]);
+    setForm(blank);
+    setShowForm(false);
+  };
+  const remove = async (id) => setInspections(inspections.filter((x) => x.id !== id));
+
+  const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
+  const filtered = inspections.filter((x) => {
+    const room = rooms.find((r) => r.id === x.roomId);
+    return (!filterBuilding || room?.building === filterBuilding) && (!filterClass || x.classification === filterClass);
+  }).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  const classColor = { "Tốt": T.green, "Khá": T.amberDark, "Trung bình": T.amber, "Vi phạm": T.red };
+
+  return (
+    <div>
+      <SectionHeader compact icon={ClipboardCheck} eyebrow={`Tổng số lượt kiểm tra: ${inspections.length}`} title="Quản lý nội vụ phòng"
+        action={perm.canManage && (
+          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Chấm điểm / Kiểm tra</Btn>
+        )} />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Ghi nhận kết quả kiểm tra vệ sinh nội vụ từng phòng, điểm số, vi phạm (nếu có) và tự động xếp loại phòng.
+      </p>
+
+      {perm.canManage && showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-3"><FormWarning message={warn} /></div>
+          <Field label="Phòng" required>
+            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+              <option value="">— Chọn phòng —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+            </select>
+          </Field>
+          <Field label="Ngày kiểm tra" required>
+            <input type="date" className={inputCls} style={inputStyle} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          </Field>
+          <Field label="Điểm vệ sinh (0-10)" required>
+            <input type="number" min="0" max="10" className={inputCls} style={inputStyle} value={form.hygieneScore} onChange={(e) => setForm({ ...form, hygieneScore: e.target.value })} />
+          </Field>
+          <div className="md:col-span-3">
+            <Field label="Vi phạm (nếu có, để trống nếu không vi phạm)">
+              <input className={inputCls} style={inputStyle} value={form.violations} onChange={(e) => setForm({ ...form, violations: e.target.value })} placeholder="VD: Để đồ đạc bừa bãi, hút thuốc trong phòng…" />
+            </Field>
+          </div>
+          <div className="md:col-span-3">
+            <Field label="Ghi chú"><input className={inputCls} style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+          </div>
+          <div className="md:col-span-3 f-body text-xs" style={{ color: T.inkSoft }}>
+            Xếp loại dự kiến: <b style={{ color: classColor[classifyRoomInspection(form.hygieneScore, Boolean(form.violations.trim()))] }}>
+              {classifyRoomInspection(form.hygieneScore, Boolean(form.violations.trim()))}
+            </b>
+          </div>
+          <div className="md:col-span-3"><Btn onClick={submit}>Lưu kết quả kiểm tra</Btn></div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => setFilterBuilding(e.target.value)}>
+          <option value="">— Tất cả toà nhà —</option>
+          {buildings.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterClass} onChange={(e) => setFilterClass(e.target.value)}>
+          <option value="">— Tất cả xếp loại —</option>
+          {INSPECTION_CLASS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có lượt kiểm tra nào phù hợp." /> : (
+        <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
+          <table className="w-full text-sm f-body table-lines">
+            <thead>
+              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-left px-3 py-2">Phòng</th>
+                <th className="text-left px-3 py-2">Ngày</th>
+                <th className="text-left px-3 py-2">Điểm</th>
+                <th className="text-left px-3 py-2">Vi phạm</th>
+                <th className="text-left px-3 py-2">Xếp loại</th>
+                <th className="text-left px-3 py-2">Người kiểm tra</th>
+                <th className="px-3 py-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((x, i) => {
+                const room = rooms.find((r) => r.id === x.roomId);
+                return (
+                  <tr key={x.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2 f-mono">{formatDob(x.date)}</td>
+                    <td className="px-3 py-2 f-mono">{x.hygieneScore}</td>
+                    <td className="px-3 py-2" style={{ color: T.inkSoft }}>{x.violations || "—"}</td>
+                    <td className="px-3 py-2">
+                      <span className="f-mono text-[10px] uppercase px-1.5 py-0.5 rounded-sm" style={{ background: classColor[x.classification] || T.green, color: "#fff" }}>{x.classification}</span>
+                    </td>
+                    <td className="px-3 py-2">{x.inspector}</td>
+                    <td className="px-3 py-2 text-right">
+                      {perm.canManage && <button onClick={() => remove(x.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: THÔNG BÁO (toàn KTX / theo tòa nhà / tầng / phòng / khoá học)
+   ============================================================ */
+function NotificationsTab({ perm, user }) {
+  const { items: notifications, setItems: setNotifications, loading } = useSharedList("notifications");
+  const { items: rooms } = useSharedList("rooms");
+  const { items: students } = useSharedList("students");
+  const [showForm, setShowForm] = useState(false);
+  const blank = { scope: "toan_ktx", scopeValue: "", title: "", content: "" };
+  const [form, setForm] = useState(blank);
+  const [warn, setWarn] = useState("");
+
+  const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
+  const areas = [...new Set(rooms.map((r) => r.area).filter(Boolean))];
+  const khoaList = [...new Set(students.map((s) => s.khoa).filter(Boolean))];
+
+  const submit = async () => {
+    if (!form.title.trim()) { setWarn("Vui lòng nhập tiêu đề thông báo."); return; }
+    if (form.scope !== "toan_ktx" && !String(form.scopeValue).trim()) { setWarn("Vui lòng chọn đối tượng nhận thông báo cụ thể."); return; }
+    setWarn("");
+    await setNotifications([
+      { id: Date.now(), scope: form.scope, scopeValue: form.scopeValue, title: form.title, content: form.content, createdAt: new Date().toISOString(), by: user },
+      ...notifications,
+    ]);
+    setForm(blank);
+    setShowForm(false);
+  };
+  const remove = async (id) => setNotifications(notifications.filter((n) => n.id !== id));
+
+  const scopeLabel = (n) => {
+    const def = NOTIFICATION_SCOPES.find((s) => s.key === n.scope);
+    if (n.scope === "toan_ktx") return def?.label || "Toàn ký túc xá";
+    if (n.scope === "phong") { const room = rooms.find((r) => r.id === Number(n.scopeValue)); return `${def?.label} · ${room ? roomLabel(room) : n.scopeValue}`; }
+    return `${def?.label} · ${n.scopeValue}`;
+  };
+
+  const sorted = [...notifications].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+  return (
+    <div>
+      <SectionHeader compact icon={Bell} eyebrow={`Tổng số thông báo: ${notifications.length}`} title="Thông báo"
+        action={perm.canManage && (
+          <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi thông báo</Btn>
+        )} />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Gửi thông báo tới toàn ký túc xá, hoặc thu hẹp theo tòa nhà, tầng/khu vực, phòng cụ thể, hoặc theo khoá học.
+      </p>
+
+      {perm.canManage && showForm && (
+        <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
+          <div className="md:col-span-2"><FormWarning message={warn} /></div>
+          <Field label="Phạm vi gửi" required>
+            <select className={inputCls} style={inputStyle} value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value, scopeValue: "" })}>
+              {NOTIFICATION_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          </Field>
+          {form.scope === "toa_nha" && (
+            <Field label="Chọn tòa nhà" required>
+              <select className={inputCls} style={inputStyle} value={form.scopeValue} onChange={(e) => setForm({ ...form, scopeValue: e.target.value })}>
+                <option value="">— Chọn —</option>
+                {buildings.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </Field>
+          )}
+          {form.scope === "tang" && (
+            <Field label="Chọn tầng / khu vực" required>
+              <select className={inputCls} style={inputStyle} value={form.scopeValue} onChange={(e) => setForm({ ...form, scopeValue: e.target.value })}>
+                <option value="">— Chọn —</option>
+                {areas.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </Field>
+          )}
+          {form.scope === "phong" && (
+            <Field label="Chọn phòng" required>
+              <select className={inputCls} style={inputStyle} value={form.scopeValue} onChange={(e) => setForm({ ...form, scopeValue: e.target.value })}>
+                <option value="">— Chọn —</option>
+                {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+              </select>
+            </Field>
+          )}
+          {form.scope === "khoa" && (
+            <Field label="Chọn khoá học" required>
+              <select className={inputCls} style={inputStyle} value={form.scopeValue} onChange={(e) => setForm({ ...form, scopeValue: e.target.value })}>
+                <option value="">— Chọn —</option>
+                {khoaList.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </Field>
+          )}
+          <div className="md:col-span-2">
+            <Field label="Tiêu đề" required><input className={inputCls} style={inputStyle} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+          </div>
+          <div className="md:col-span-2">
+            <Field label="Nội dung"><textarea rows={3} className={inputCls} style={inputStyle} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} /></Field>
+          </div>
+          <div className="md:col-span-2"><Btn onClick={submit}>Gửi thông báo</Btn></div>
+        </div>
+      )}
+
+      {loading ? <LoadingRow /> : sorted.length === 0 ? <EmptyState text="Chưa có thông báo nào." /> : (
+        <div className="space-y-3">
+          {sorted.map((n) => (
+            <div key={n.id} className="stamp-border p-3" style={{ background: "#fff" }}>
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div>
+                  <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{n.title}</div>
+                  <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{scopeLabel(n)} · {formatDateTime(n.createdAt)} · {n.by}</div>
+                </div>
+                {perm.canManage && <button onClick={() => remove(n.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+              </div>
+              {n.content && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{n.content}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: BÁO CÁO - THỐNG KÊ (danh sách, tỷ lệ sử dụng, xuất Excel)
+   ============================================================ */
+async function exportSheetsToExcel(filename, sheets) {
+  const XLSX = await loadXLSXLib();
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(({ name, rows }) => {
+    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "Không có dữ liệu": "" }]);
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  });
+  XLSX.writeFile(wb, filename);
+}
+
+function ReportsTab({ perm }) {
+  const { items: rooms, loading: roomsLoading } = useSharedList("rooms");
+  const { items: students, loading: studentsLoading } = useSharedList("students");
+  const { items: assets, loading: assetsLoading } = useSharedList("assets");
+  const { items: maint, loading: maintLoading } = useSharedList("maintenance");
+  const [exporting, setExporting] = useState(false);
+
+  const loading = roomsLoading || studentsLoading || assetsLoading || maintLoading;
+  const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
+  const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
+  const occupied = activeStudents.filter((s) => s.roomId).length;
+  const usageRate = totalCapacity > 0 ? Math.round((occupied / totalCapacity) * 1000) / 10 : 0;
+
+  const assetByStatus = ASSET_STATUS.reduce((acc, s) => { acc[s] = assets.filter((a) => a.status === s).length; return acc; }, {});
+  const maintByStatus = MAINT_STATUS.reduce((acc, s) => { acc[s] = maint.filter((m) => m.status === s).length; return acc; }, {});
+
+  const doExport = async () => {
+    setExporting(true);
+    try {
+      const studentRows = activeStudents.map((s) => {
+        const room = rooms.find((r) => r.id === s.roomId);
+        return { "MSV": s.msv, "Họ tên": s.name, "Giới tính": s.gender, "Khoá": s.khoa, "Lớp": s.lop, "Phòng": room ? roomLabel(room) : "Chưa xếp phòng", "Trạng thái": s.status || "Đang ở" };
+      });
+      const roomRows = rooms.map((r) => ({ "Toà nhà": r.building, "Tầng/Khu vực": r.area, "Số phòng": r.roomNumber, "Sức chứa": r.capacity, "Trạng thái": r.status || "Trống", "SL đang ở": activeStudents.filter((s) => s.roomId === r.id).length }));
+      const assetRows = assets.map((a) => { const room = rooms.find((r) => r.id === a.roomId); return { "Phòng": room ? roomLabel(room) : "—", "Tên tài sản": a.name, "Phân loại": a.category, "Số lượng": a.quantity, "Tình trạng": a.status, "Ghi chú": a.note }; });
+      const maintRows = maint.map((m) => { const room = rooms.find((r) => r.id === m.roomId); return { "Phòng": room ? roomLabel(room) : "—", "Nội dung": m.title, "Người gửi": m.reporterName, "Trạng thái": m.status, "Ngày gửi": formatDateTime(m.createdAt) }; });
+      await exportSheetsToExcel(`BaoCaoKyTucXa_${new Date().toISOString().slice(0, 10)}.xlsx`, [
+        { name: "Học viên nội trú", rows: studentRows },
+        { name: "Danh sách phòng", rows: roomRows },
+        { name: "Tài sản", rows: assetRows },
+        { name: "Bảo trì", rows: maintRows },
+      ]);
+    } catch (e) {
+      reportGlobalError(`Xuất Excel thất bại — ${e?.message || e}`);
+    }
+    setExporting(false);
+  };
+
+  return (
+    <div>
+      <SectionHeader icon={ClipboardCheck} eyebrow="Chỉ quản trị / cán bộ" title="Báo cáo - Thống kê"
+        action={<Btn size="sm" onClick={doExport} disabled={exporting || loading}>{exporting ? "Đang xuất…" : "Xuất Excel"}</Btn>} />
+
+      {loading ? <LoadingRow /> : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Học viên nội trú</div>
+              <div className="f-display text-2xl font-semibold" style={{ color: T.green }}>{activeStudents.length}</div>
+            </div>
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Tổng số phòng</div>
+              <div className="f-display text-2xl font-semibold" style={{ color: T.green }}>{rooms.length}</div>
+            </div>
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Tỷ lệ sử dụng phòng</div>
+              <div className="f-display text-2xl font-semibold" style={{ color: T.amberDark }}>{usageRate}%</div>
+            </div>
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-mono text-[10px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Yêu cầu sửa chữa</div>
+              <div className="f-display text-2xl font-semibold" style={{ color: T.red }}>{maint.length}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Báo cáo tài sản (theo tình trạng)</div>
+              {ASSET_STATUS.map((s) => (
+                <div key={s} className="flex items-center justify-between f-body text-sm mb-1">
+                  <span style={{ color: T.ink }}>{s}</span>
+                  <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : T.green }}>{assetByStatus[s] || 0}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
+                <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
+              </div>
+            </div>
+            <div className="stamp-border p-4" style={{ background: "#fff" }}>
+              <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Báo cáo sửa chữa (theo trạng thái)</div>
+              {MAINT_STATUS.map((s) => (
+                <div key={s} className="flex items-center justify-between f-body text-sm mb-1">
+                  <span style={{ color: T.ink }}>{s}</span>
+                  <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : T.green }}>{maintByStatus[s] || 0}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="f-body text-xs mt-4 italic" style={{ color: T.inkSoft }}>
+            Bấm "Xuất Excel" để tải về báo cáo đầy đủ gồm danh sách học viên nội trú, danh sách phòng, tài sản và bảo trì (nhiều sheet trong 1 file).
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============ TAB: PHÂN QUYỀN ============ */
+function PermissionsTab({ permissions, setPermissions, permLoading }) {
+  const { items: students } = useSharedList("students");
+  const [nameInput, setNameInput] = useState("");
+  const [roleInput, setRoleInput] = useState("can_bo");
+  const [warn, setWarn] = useState("");
+
+  const grant = async () => {
+    const nm = nameInput.trim();
+    if (!nm) { setWarn("Vui lòng nhập Họ và tên trước khi gán quyền."); return; }
+    setWarn("");
+    const rest = permissions.filter((p) => normalizeName(p.name) !== normalizeName(nm));
+    await setPermissions([...rest, { id: Date.now(), name: nm, role: roleInput }]);
+    setNameInput("");
+  };
+  const revoke = async (id) => setPermissions(permissions.filter((p) => p.id !== id));
+  const [selectedId, setSelectedId] = useState(null);
+  const toggleSelect = (id) => setSelectedId((s) => (s === id ? null : id));
+
+  const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Tài sản & Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
+
+  return (
+    <div>
+      <SectionHeader icon={Shield} eyebrow="Chỉ quản trị" title="Phân quyền người dùng" />
+
+      <BackupSection />
+
+      <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+        <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+          Mặc định, chỉ <b>Quản trị viên</b> và <b>Cán bộ quản lý ký túc xá</b> mới được thêm/xoá/sửa Phòng, Học viên, Bố trí và Phân quyền.
+          Vai trò <b>Kỹ thuật</b> chỉ được quản lý mục Tài sản - thiết bị và Bảo trì (cập nhật trạng thái, ghi chú xử lý).
+          Học viên chỉ gửi được yêu cầu bảo trì và tự xoá yêu cầu do chính mình gửi. Nhập đúng họ tên người đó dùng để đăng nhập, rồi chọn vai trò.
+        </p>
+        <FormWarning message={warn} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <Field label="Họ và tên" required>
+            <input list="student-names" className={inputCls} style={inputStyle} value={nameInput} onChange={(e) => setNameInput(e.target.value)} placeholder="VD: Nguyễn Văn A" />
+            <datalist id="student-names">
+              {students.map((m) => <option key={m.id} value={m.name} />)}
+            </datalist>
+          </Field>
+          <Field label="Vai trò">
+            <select className={inputCls} style={inputStyle} value={roleInput} onChange={(e) => setRoleInput(e.target.value)}>
+              <option value="can_bo">Cán bộ quản lý ký túc xá</option>
+              <option value="ky_thuat">Kỹ thuật</option>
+              <option value="sinh_vien">Học viên</option>
+            </select>
+          </Field>
+          <div><Btn onClick={grant}>Gán quyền</Btn></div>
+        </div>
+      </div>
+
+      {permLoading ? <LoadingRow /> : permissions.length === 0 ? (
+        <EmptyState text="Chưa gán quyền cho ai — mọi người hiện đều là Sinh viên mặc định." />
+      ) : (
+        <div className="overflow-x-auto stamp-border" style={{ background: "#fff" }}>
+          <table className="w-full text-sm f-body table-lines">
+            <thead>
+              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-left px-3 py-2">Họ tên</th><th className="text-left px-3 py-2">Vai trò</th><th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {permissions.map((p, i) => (
+                <tr key={p.id} onClick={() => toggleSelect(p.id)} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === p.id)}>
+                  <td className="px-3 py-2 font-medium">{p.name}</td>
+                  <td className="px-3 py-2">{roleLabel[p.role] || p.role}</td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => revoke(p.id)} title="Gỡ quyền (về Sinh viên mặc định)"><Trash2 size={14} style={{ color: T.red }} /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============ MAIN APP ============ */
+const TABS = [
+  { id: "home", label: "Tổng quan", icon: LayoutGrid },
+  { id: "rooms", label: "Danh sách phòng", icon: Building2 },
+  { id: "students", label: "Sinh viên nội trú", icon: Users },
+  { id: "assignment", label: "Bố trí sinh viên", icon: ArrowRightLeft },
+  { id: "roster", label: "Quản lý quân số", icon: Users },
+  { id: "assets", label: "Tài sản & thiết bị", icon: Boxes },
+  { id: "maintenance", label: "Quản lý bảo trì", icon: Wrench },
+  { id: "utilities", label: "Điện - Nước", icon: Zap },
+  { id: "inspections", label: "Nội vụ phòng", icon: ClipboardCheck },
+  { id: "notifications", label: "Thông báo", icon: Bell },
+  { id: "docs", label: "Tài liệu - Văn bản", icon: FolderOpen },
+];
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [isAdminLogin, setIsAdminLogin] = useState(false);
+  const [tab, setTab] = useState("home");
+  const [navOpen, setNavOpen] = useState(false);
+  const { value: managerInfo, setValue: setManagerInfo } = useSingleDoc("managerInfo", { name: "", phone: "" });
+  const [editingManager, setEditingManager] = useState(false);
+  const [managerForm, setManagerForm] = useState({ name: "", phone: "" });
+
+  const { perm, permissions, setPermissions, permLoading } = useRole(user, isAdminLogin);
+
+  if (!user) return <LoginGate onLogin={(name, admin) => { setUser(name); setIsAdminLogin(!!admin); }} />;
+
+  const roleBadge = { admin: "Quản trị", can_bo: "Cán bộ quản lý", ky_thuat: "Kỹ thuật", sinh_vien: "Học viên" };
+  const canEditManager = perm.canManage;
+  const startEditManager = () => { setManagerForm({ name: managerInfo.name || "", phone: managerInfo.phone || "" }); setEditingManager(true); };
+  const cancelEditManager = () => setEditingManager(false);
+  const saveManager = async () => { await setManagerInfo({ name: managerForm.name.trim(), phone: managerForm.phone.trim() }); setEditingManager(false); };
+
+  const goToTab = (tabId) => { setTab(tabId); setNavOpen(false); };
+
+  const renderTab = () => {
+    switch (tab) {
+      case "home": return <DashboardTab perm={perm} />;
+      case "rooms": return <RoomsTab perm={perm} />;
+      case "students": return <StudentsTab perm={perm} user={user} />;
+      case "assignment": return <AssignmentTab perm={perm} />;
+      case "roster": return <RosterTab perm={perm} />;
+      case "assets": return <AssetsTab perm={perm} user={user} />;
+      case "maintenance": return <MaintenanceTab perm={perm} user={user} />;
+      case "utilities": return <UtilitiesTab perm={perm} user={user} />;
+      case "inspections": return <InspectionTab perm={perm} user={user} />;
+      case "notifications": return <NotificationsTab perm={perm} user={user} />;
+      case "reports": return <ReportsTab perm={perm} />;
+      case "docs": return <DocsTab user={user} perm={perm} />;
+      case "permissions": return <PermissionsTab permissions={permissions} setPermissions={setPermissions} permLoading={permLoading} />;
+      case "password": return <PasswordTab user={user} perm={perm} />;
+      default: return null;
+    }
+  };
+
+  const visibleTabs = [
+    ...TABS,
+    ...(perm.canManage ? [{ id: "reports", label: "Báo cáo - Thống kê", icon: ClipboardCheck }] : []),
+    ...(perm.isAdmin ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
+    ...(perm.isAdmin ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
+  ];
+  const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
+  const RoleIcon = roleIcon[perm.role] || Users;
+
+  return (
+    <div className="min-h-screen paper-tex f-body" style={{ color: T.ink }}>
+      <style>{FONT_STYLE}</style>
+      <ErrorBanner />
+
+      <header
+        className="flex items-center justify-between px-4 md:px-6 py-3 relative z-30"
+        style={{ background: `linear-gradient(180deg, ${T.green}, ${T.greenDark})`, borderBottom: `2px solid ${T.gold}` }}
+      >
+        <div className="flex items-center gap-3">
+          <button className="md:hidden p-1.5 -ml-1" onClick={() => setNavOpen(true)} style={{ color: T.paper }} aria-label="Mở menu">
+            <Menu size={22} />
+          </button>
+          <Emblem size={38} ring />
+          <div>
+            <div className="f-mono text-[9.5px] tracking-[0.2em] uppercase" style={{ color: T.amber }}>Đại học Cảnh sát nhân dân</div>
+            <div className="f-display text-sm md:text-base font-semibold tracking-wide" style={{ color: T.paper }}>QUẢN LÝ KÝ TÚC XÁ</div>
+            {editingManager ? (
+              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                <input
+                  className="f-body text-[10.5px] px-1.5 py-0.5 rounded-sm w-28 input-plain"
+                  style={{ background: "rgba(255,255,255,0.92)", color: T.ink, border: "none" }}
+                  placeholder="Tên Ban quản lý"
+                  value={managerForm.name}
+                  onChange={(e) => setManagerForm({ ...managerForm, name: e.target.value })}
+                />
+                <input
+                  className="f-mono text-[10.5px] px-1.5 py-0.5 rounded-sm w-24 input-plain"
+                  style={{ background: "rgba(255,255,255,0.92)", color: T.ink, border: "none" }}
+                  placeholder="Số điện thoại"
+                  value={managerForm.phone}
+                  onChange={(e) => setManagerForm({ ...managerForm, phone: e.target.value })}
+                />
+                <button onClick={saveManager} title="Lưu"><CheckCircle2 size={15} style={{ color: T.amber }} /></button>
+                <button onClick={cancelEditManager} title="Huỷ"><X size={15} style={{ color: T.paper }} /></button>
+              </div>
+            ) : (
+              (managerInfo.name || managerInfo.phone || canEditManager) && (
+                <div className="f-mono text-[10px] mt-0.5" style={{ color: "rgba(237,230,214,0.75)" }}>
+                  {managerInfo.name || managerInfo.phone ? (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>BAN QUẢN LÝ: {managerInfo.name || "—"}</span>
+                      {canEditManager && (
+                        <button onClick={startEditManager} title="Sửa thông tin Ban quản lý KTX">
+                          <Pencil size={10} style={{ color: T.amber }} />
+                        </button>
+                      )}
+                      <span className="basis-full">SỐ ĐT: {managerInfo.phone || "—"}</span>
+                    </div>
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <span className="italic">Chưa có thông tin Ban quản lý ký túc xá</span>
+                      {canEditManager && (
+                        <button onClick={startEditManager} title="Sửa thông tin Ban quản lý KTX">
+                          <Pencil size={10} style={{ color: T.amber }} />
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-3 md:gap-4">
+          <span className="f-body text-sm hidden sm:flex items-center gap-2" style={{ color: T.paper }}>
+            Xin chào, <b>{user}</b>
+            <span
+              className="f-display text-[10px] uppercase tracking-wider pl-1.5 pr-2.5 py-1 inline-flex items-center gap-1 rounded-full"
+              style={{ background: T.amber, color: T.greenDark }}
+            >
+              <RoleIcon size={11} /> {roleBadge[perm.role]}
+            </span>
+          </span>
+          <button
+            onClick={() => { setUser(null); setIsAdminLogin(false); }}
+            className="f-display text-xs uppercase flex items-center gap-1.5 px-3 py-1.5 btn-press rounded-sm"
+            style={{ color: T.paper, border: `1px solid ${T.amber}` }}
+          >
+            <LogOut size={14} /> <span className="hidden sm:inline">Thoát</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="flex">
+        {navOpen && (
+          <div
+            className="fixed inset-0 z-40 md:hidden drawer-backdrop"
+            style={{ background: "rgba(19,31,25,0.55)" }}
+            onClick={() => setNavOpen(false)}
+          />
+        )}
+
+        <nav
+          className={`fixed md:sticky md:top-0 inset-y-0 left-0 z-50 md:z-auto w-64 md:w-56 shrink-0 flex flex-col transform transition-transform duration-300 md:translate-x-0 ${navOpen ? "translate-x-0" : "-translate-x-full"}`}
+          style={{ background: T.green, height: "100vh" }}
+        >
+          <div className="flex items-center justify-between px-5 py-3 md:hidden" style={{ borderBottom: "1px solid rgba(255,255,255,0.15)" }}>
+            <span className="f-display text-xs uppercase tracking-widest" style={{ color: T.amber }}>Danh mục</span>
+            <button onClick={() => setNavOpen(false)} style={{ color: T.paper }} aria-label="Đóng menu">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto scrollbar-thin py-0.5">
+            {visibleTabs.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => goToTab(t.id)}
+                  className={`nav-item w-full flex items-center gap-2.5 px-4 py-2 f-display text-[12.5px] uppercase tracking-wide text-left ${active ? "nav-item-active" : ""}`}
+                  style={{
+                    background: active ? T.amber : "transparent",
+                    color: active ? T.greenDark : T.paper,
+                    borderLeft: active ? `4px solid ${T.gold}` : "4px solid transparent",
+                  }}
+                >
+                  <span
+                    className="icon-badge icon-badge-sm"
+                    style={{ background: active ? "rgba(19,31,25,0.12)" : "rgba(255,255,255,0.08)" }}
+                  >
+                    <Icon size={12} />
+                  </span>
+                  <span className="flex-1 leading-tight">{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            className="flex items-center gap-2.5 px-5 py-3 shrink-0"
+            style={{ borderTop: "1px solid rgba(255,255,255,0.15)" }}
+          >
+            <Emblem size={24} />
+            <span className="f-mono text-[9.5px] uppercase tracking-widest" style={{ color: "rgba(237,230,214,0.6)" }}>
+              KÝ TÚC XÁ · ĐH CSND
+            </span>
+          </div>
+        </nav>
+
+        <main className="flex-1 min-w-0 p-4 md:p-8">
+          <div
+            className="max-w-6xl mx-auto p-5 md:p-9 card-sheet"
+            style={{ background: T.paper, border: `1px solid ${T.paperDark}`, borderTop: `3px solid ${T.gold}` }}
+          >
+            {renderTab()}
+          </div>
+        </main>
+      </div>
+
+      <footer className="text-center f-mono text-[11px] py-4 space-y-1" style={{ color: T.inkSoft }}>
+        <div>Ký túc xá — Trường Đại học Cảnh sát nhân dân</div>
+      </footer>
+    </div>
+  );
+}
