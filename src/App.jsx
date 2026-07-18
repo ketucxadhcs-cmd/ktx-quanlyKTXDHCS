@@ -1203,12 +1203,9 @@ function DashboardTab({ perm, onNavigate }) {
 
   const loading = roomsLoading || studentsLoading || maintLoading || assetsLoading;
 
-  // Chỉ cho bấm sang mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
-  const goIfAllowed = (tabId) => {
-    if (!onNavigate) return undefined;
-    if (!(TAB_ROLES[tabId] || []).includes(perm.role)) return undefined;
-    return () => onNavigate(tabId);
-  };
+  // Chỉ cho bấm/xem mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
+  const isAllowed = (tabId) => (TAB_ROLES[tabId] || []).includes(perm.role);
+  const goIfAllowed = (tabId) => (onNavigate && isAllowed(tabId) ? () => onNavigate(tabId) : undefined);
 
   const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
   const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
@@ -1261,7 +1258,7 @@ function DashboardTab({ perm, onNavigate }) {
       {loading ? <LoadingRow /> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} onClick={goIfAllowed("students")} />
+            {isAllowed("students") && <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} onClick={goIfAllowed("students")} />}
             <StatCard icon={Building2} label="Tổng số phòng" value={rooms.length} onClick={goIfAllowed("rooms")} />
             <StatCard icon={BedDouble} label="Phòng đang sử dụng" value={byStatus["Đang ở"] || 0} accent={T.amberDark} onClick={goIfAllowed("rooms")} />
             <StatCard icon={DoorOpen} label="Phòng còn trống" value={byStatus["Trống"] || 0} accent={T.green} onClick={goIfAllowed("rooms")} />
@@ -1269,8 +1266,8 @@ function DashboardTab({ perm, onNavigate }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <StatCard icon={Wrench} label="Phòng bảo trì" value={byStatus["Đang bảo trì"] || 0} accent={T.red} onClick={goIfAllowed("rooms")} />
             <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} onClick={goIfAllowed("maintenance")} />
-            <StatCard icon={AlertTriangle} label="Tài sản hỏng" value={brokenAssets} accent={T.red} onClick={goIfAllowed("assets")} />
-            <StatCard icon={AlertTriangle} label="SV chưa xếp phòng" value={unassigned} accent={T.amberDark} onClick={goIfAllowed("assignment")} />
+            {isAllowed("assets") && <StatCard icon={AlertTriangle} label="Tài sản hỏng" value={brokenAssets} accent={T.red} onClick={goIfAllowed("assets")} />}
+            {isAllowed("assignment") && <StatCard icon={AlertTriangle} label="SV chưa xếp phòng" value={unassigned} accent={T.amberDark} onClick={goIfAllowed("assignment")} />}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -1299,10 +1296,12 @@ function DashboardTab({ perm, onNavigate }) {
                 <span style={{ color: T.ink }}>Tổng số yêu cầu đã ghi nhận</span>
                 <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
               </div>
-              <div className="flex items-center justify-between f-body text-sm">
-                <span style={{ color: T.ink }}>Tài sản hỏng / tổng tài sản</span>
-                <span className="f-mono font-semibold" style={{ color: brokenAssets > 0 ? T.red : T.green }}>{brokenAssets} / {assets.length}</span>
-              </div>
+              {isAllowed("assets") && (
+                <div className="flex items-center justify-between f-body text-sm">
+                  <span style={{ color: T.ink }}>Tài sản hỏng / tổng tài sản</span>
+                  <span className="f-mono font-semibold" style={{ color: brokenAssets > 0 ? T.red : T.green }}>{brokenAssets} / {assets.length}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2230,35 +2229,103 @@ function AssignmentTab({ perm }) {
 
   const khoaOptions = [...new Set(students.map((s) => s.khoa).filter(Boolean))];
 
-  const runAssignment = () => {
-    const roomsSorted = [...rooms]
+  // Số người đang ở hiện tại của từng phòng (từ dữ liệu đã lưu, chưa tính đợt bố trí đang chạy thử).
+  const computeRemaining = () => {
+    const occ = {};
+    students.forEach((s) => { if (s.roomId && s.status !== "Đã trả phòng") occ[s.roomId] = (occ[s.roomId] || 0) + 1; });
+    const rem = {};
+    rooms.forEach((r) => { rem[r.id] = Math.max((Number(r.capacity) || 0) - (occ[r.id] || 0), 0); });
+    return rem;
+  };
+  const roomOccupants = (roomId) => students.filter((s) => s.roomId === roomId && s.status !== "Đã trả phòng");
+
+  // Gợi ý thông minh cho 1 học viên: tự xét giới tính (bắt buộc đúng), còn chỗ trống, ưu tiên phòng đã có
+  // bạn cùng lớp / cùng khoá ở (để giữ đơn vị đi cùng nhau), và không được đang bảo trì.
+  const suggestRoomsForStudent = (student, remainingMap) => {
+    if (!student) return [];
+    const g = student.gender || "Nam";
+    return rooms
       .filter((r) => (r.status || "Trống") !== "Đang bảo trì")
-      .sort((a, b) => (a.building || "").localeCompare(b.building || "") || String(a.roomNumber || "").localeCompare(String(b.roomNumber || ""), undefined, { numeric: true }));
+      .filter((r) => !r.gender || r.gender === g)
+      .filter((r) => (remainingMap[r.id] || 0) > 0)
+      .map((r) => {
+        const occ = roomOccupants(r.id);
+        const sameLop = student.lop ? occ.filter((o) => o.lop && o.lop === student.lop).length : 0;
+        const sameKhoa = student.khoa ? occ.filter((o) => o.khoa && o.khoa === student.khoa && o.lop !== student.lop).length : 0;
+        const otherLop = occ.filter((o) => student.lop && o.lop && o.lop !== student.lop).length;
+        const reasons = [];
+        if (sameLop > 0) reasons.push(`Cùng lớp: ${sameLop} bạn đang ở`);
+        if (sameKhoa > 0) reasons.push(`Cùng khoá: ${sameKhoa} bạn đang ở`);
+        if (occ.length === 0) reasons.push("Phòng đang trống hoàn toàn");
+        else if (otherLop > 0 && sameLop === 0) reasons.push(`Có ${otherLop} bạn khác lớp đang ở`);
+        reasons.push(`Còn ${remainingMap[r.id]} chỗ trống`);
+        const score = sameLop * 100 + sameKhoa * 10 - otherLop * 3 + (occ.length === 0 ? 1 : 0);
+        return { room: r, score, reasons, sameLop, sameKhoa };
+      })
+      .sort((a, b) =>
+        b.score - a.score ||
+        naturalCompare(a.room.building || "", b.room.building || "") ||
+        naturalCompare(String(a.room.roomNumber || ""), String(b.room.roomNumber || ""))
+      );
+  };
 
-    const occupied = {};
-    students.forEach((s) => { if (s.roomId && s.status !== "Đã trả phòng") occupied[s.roomId] = (occupied[s.roomId] || 0) + 1; });
+  // Gợi ý & xếp cho từng học viên riêng lẻ, chọn tay từng bạn rồi xem gợi ý.
+  const [suggestStudentId, setSuggestStudentId] = useState("");
+  const suggestStudent = unassigned.find((s) => String(s.id) === String(suggestStudentId)) || null;
+  const suggestions = suggestStudent ? suggestRoomsForStudent(suggestStudent, computeRemaining()).slice(0, 5) : [];
+  const assignOne = async (studentId, roomId) => {
+    await setStudents(students.map((s) => (s.id === studentId ? { ...s, roomId, status: "Đang ở" } : s)));
+    setMsg("Đã xếp phòng cho học viên theo gợi ý.");
+    setSuggestStudentId("");
+  };
 
-    const remaining = {};
-    roomsSorted.forEach((r) => { remaining[r.id] = Math.max((Number(r.capacity) || 0) - (occupied[r.id] || 0), 0); });
+  const runAssignment = () => {
+    const candidateRooms = rooms.filter((r) => (r.status || "Trống") !== "Đang bảo trì");
 
-    const groups = unassigned.reduce((acc, s) => {
-      const k = s.gender || "Nam";
-      (acc[k] = acc[k] || []).push(s);
-      return acc;
-    }, {});
+    const remaining = computeRemaining();
+    // Đếm số người theo lớp / theo khoá trong từng phòng — cập nhật dần trong lúc mô phỏng để các bạn
+    // cùng lớp/khoá được ưu tiên xếp gần nhau, giữ nguyên đơn vị (trung đội/lớp) trong cùng 1 phòng.
+    const roomLopCount = {};
+    const roomKhoaCount = {};
+    const roomOccCount = {};
+    rooms.forEach((r) => { roomOccCount[r.id] = 0; });
+    students.forEach((s) => {
+      if (!s.roomId || s.status === "Đã trả phòng") return;
+      roomOccCount[s.roomId] = (roomOccCount[s.roomId] || 0) + 1;
+      if (s.lop) { const k = `${s.roomId}|${s.lop}`; roomLopCount[k] = (roomLopCount[k] || 0) + 1; }
+      if (s.khoa) { const k = `${s.roomId}|${s.khoa}`; roomKhoaCount[k] = (roomKhoaCount[k] || 0) + 1; }
+    });
+
+    // Xếp thứ tự xử lý: theo giới tính (bắt buộc đúng), rồi theo khoá, rồi theo lớp — để các bạn cùng
+    // lớp được xét liên tiếp, dễ được gom vào cùng 1 phòng bởi thuật toán chấm điểm bên dưới.
+    const sortedStudents = [...unassigned].sort((a, b) =>
+      (a.gender || "").localeCompare(b.gender || "") ||
+      (a.khoa || "").localeCompare(b.khoa || "") ||
+      (a.lop || "").localeCompare(b.lop || "")
+    );
 
     const assignments = [];
     const notPlaced = [];
-    Object.entries(groups).forEach(([g, list]) => {
-      const candidateRooms = roomsSorted.filter((r) => !r.gender || r.gender === g);
-      let ri = 0;
-      list.forEach((s) => {
-        while (ri < candidateRooms.length && remaining[candidateRooms[ri].id] <= 0) ri++;
-        if (ri >= candidateRooms.length) { notPlaced.push(s); return; }
-        const room = candidateRooms[ri];
-        assignments.push({ studentId: s.id, studentName: s.name, roomId: room.id, roomLabel: roomLabel(room) });
-        remaining[room.id] -= 1;
+
+    sortedStudents.forEach((s) => {
+      const g = s.gender || "Nam";
+      const options = candidateRooms.filter((r) => (!r.gender || r.gender === g) && (remaining[r.id] || 0) > 0);
+      if (options.length === 0) { notPlaced.push(s); return; }
+      let best = null;
+      let bestScore = -Infinity;
+      options.forEach((r) => {
+        const sameLop = s.lop ? (roomLopCount[`${r.id}|${s.lop}`] || 0) : 0;
+        const sameKhoa = s.khoa ? (roomKhoaCount[`${r.id}|${s.khoa}`] || 0) : 0;
+        const occCount = roomOccCount[r.id] || 0;
+        const otherLop = Math.max(occCount - sameLop, 0);
+        const score = sameLop * 100 + sameKhoa * 10 - otherLop * 3 + (occCount === 0 ? 1 : 0);
+        if (score > bestScore) { bestScore = score; best = r; }
       });
+      assignments.push({ studentId: s.id, studentName: s.name, roomId: best.id, roomLabel: roomLabel(best) });
+      remaining[best.id] -= 1;
+      roomOccCount[best.id] = (roomOccCount[best.id] || 0) + 1;
+      if (s.lop) { const k = `${best.id}|${s.lop}`; roomLopCount[k] = (roomLopCount[k] || 0) + 1; }
+      if (s.khoa) { const k = `${best.id}|${s.khoa}`; roomKhoaCount[k] = (roomKhoaCount[k] || 0) + 1; }
     });
 
     setPreview({ assignments, notPlaced });
@@ -2279,8 +2346,9 @@ function AssignmentTab({ perm }) {
     <div>
       <SectionHeader icon={LayoutGrid} eyebrow="Xếp phòng tự động" title="Bố trí sinh viên vào phòng" />
       <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
-        Hệ thống chỉ bố trí những sinh viên <b>chưa có phòng</b>, ưu tiên đúng giới tính quy định của từng phòng,
-        lấp đầy phòng theo thứ tự Toà nhà → Số phòng. Bạn có thể lọc trước theo Khoá học / Năm học nếu muốn xếp riêng từng đợt.
+        Hệ thống chỉ bố trí những sinh viên <b>chưa có phòng</b>, luôn xếp đúng giới tính quy định của từng phòng,
+        và tự động ưu tiên gom các bạn <b>cùng lớp / cùng khoá</b> vào chung phòng với nhau (giữ nguyên đơn vị, đỡ phải xếp lại).
+        Bạn có thể lọc trước theo Khoá học / Năm học nếu muốn xếp riêng từng đợt, hoặc dùng mục "Gợi ý cho từng học viên" bên dưới để xếp tay theo gợi ý của hệ thống.
       </p>
 
       <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-4 gap-3" style={{ background: "#fff" }}>
@@ -2310,6 +2378,48 @@ function AssignmentTab({ perm }) {
       </div>
 
       {msg && <div className="f-body text-sm mb-4" style={{ color: T.green }}>{msg}</div>}
+
+      <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+        <div className="f-display text-sm uppercase tracking-wider mb-1" style={{ color: T.amberDark }}>
+          Gợi ý thông minh — xếp theo từng học viên
+        </div>
+        <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+          Chọn 1 học viên chưa có phòng, hệ thống tự xét giới tính, lớp, khoá và số chỗ còn trống của từng phòng để gợi ý phòng phù hợp nhất, xếp lên trước.
+        </p>
+        <Field label="Chọn học viên">
+          <select className={inputCls} style={inputStyle} value={suggestStudentId} onChange={(e) => setSuggestStudentId(e.target.value)}>
+            <option value="">— Chọn học viên cần xếp phòng —</option>
+            {unassigned.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}{s.lop ? ` — Lớp ${s.lop}` : ""}{s.khoa ? ` — Khoá ${s.khoa}` : ""}</option>
+            ))}
+          </select>
+        </Field>
+
+        {suggestStudent && (
+          suggestions.length === 0 ? (
+            <EmptyState text="Không tìm được phòng còn trống, đúng giới tính cho học viên này." />
+          ) : (
+            <div className="space-y-2 mt-1">
+              {suggestions.map(({ room, reasons }, idx) => (
+                <div key={room.id} className="flex items-center justify-between gap-3 flex-wrap p-2.5" style={{ border: `1px solid ${T.paperDark}`, background: idx === 0 ? T.paper : "#fff" }}>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="f-display text-sm font-semibold" style={{ color: T.green }}>{roomLabel(room)}</span>
+                      {idx === 0 && (
+                        <span className="f-display text-[9.5px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm" style={{ background: T.amber, color: T.greenDark }}>Phù hợp nhất</span>
+                      )}
+                    </div>
+                    <div className="f-body text-[11px] mt-1 flex flex-wrap gap-x-2 gap-y-0.5" style={{ color: T.inkSoft }}>
+                      {reasons.map((r, i) => <span key={i}>· {r}</span>)}
+                    </div>
+                  </div>
+                  <Btn size="sm" onClick={() => assignOne(suggestStudent.id, room.id)}><CheckCircle2 size={13} /> Xếp vào phòng này</Btn>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
 
       {preview && (
         <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
