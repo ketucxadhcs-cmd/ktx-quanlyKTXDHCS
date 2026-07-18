@@ -1498,6 +1498,8 @@ function RoomsTab({ perm }) {
   const [expandedId, setExpandedId] = useState(null);
   const [mergeFrom, setMergeFrom] = useState(null);
   const [mergeTarget, setMergeTarget] = useState("");
+  const [renamingBuilding, setRenamingBuilding] = useState(null); // Tên toà nhà (cũ) đang được đổi tên inline
+  const [renameValue, setRenameValue] = useState("");
 
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
 
@@ -1523,6 +1525,20 @@ function RoomsTab({ perm }) {
   };
   const toggleStatus = async (r, status) => {
     await setRooms(rooms.map((x) => (x.id === r.id ? { ...x, status } : x)));
+  };
+
+  // Đổi tên toà nhà — sửa lỗi chính tả/sai sót mà không phải sửa tay từng phòng.
+  const renameBuilding = async (oldName, newNameRaw) => {
+    const newName = (newNameRaw || "").trim();
+    if (!newName) { reportGlobalError("Tên toà nhà không được để trống."); return; }
+    if (newName === oldName) { setRenamingBuilding(null); return; }
+    if (rooms.some((r) => (r.building || "") === newName)) {
+      reportGlobalError(`Đã tồn tại toà nhà "${newName}" — hãy dùng chức năng dồn phòng nếu muốn gộp.`);
+      return;
+    }
+    await setRooms(rooms.map((r) => ((r.building || "") === oldName ? { ...r, building: newName } : r)));
+    if (filterBuilding === oldName) setFilterBuilding(newName);
+    setRenamingBuilding(null);
   };
 
   const doMerge = async () => {
@@ -1630,7 +1646,41 @@ function RoomsTab({ perm }) {
             <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
               <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
                 <Building2 size={14} style={{ color: T.amber }} />
-                <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
+                {renamingBuilding === building ? (
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      autoFocus
+                      className="f-body text-xs px-2 py-1 outline-none rounded-sm"
+                      style={{ ...inputStyle, width: 160 }}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") renameBuilding(building, renameValue);
+                        if (e.key === "Escape") setRenamingBuilding(null);
+                      }}
+                    />
+                    <button type="button" title="Lưu" onClick={() => renameBuilding(building, renameValue)} className="p-1 rounded-sm" style={{ background: T.gold }}>
+                      <CheckCircle2 size={13} style={{ color: T.greenDark }} />
+                    </button>
+                    <button type="button" title="Huỷ" onClick={() => setRenamingBuilding(null)} className="p-1 rounded-sm" style={{ background: "rgba(237,230,214,0.25)" }}>
+                      <X size={13} style={{ color: T.paper }} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
+                    {building !== UNKNOWN_BUILDING && perm.canManage && (
+                      <button
+                        type="button"
+                        title="Sửa tên toà nhà"
+                        onClick={() => { setRenamingBuilding(building); setRenameValue(building); }}
+                        className="p-0.5 rounded-sm opacity-80 hover:opacity-100"
+                      >
+                        <Pencil size={12} style={{ color: T.amber }} />
+                      </button>
+                    )}
+                  </>
+                )}
                 <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} phòng)</span>
               </div>
               <div className="p-2.5">
@@ -1671,7 +1721,7 @@ function RoomsTab({ perm }) {
                           {area}
                         </div>
                       )}
-                      <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 560, minHeight: areaList.length > 0 ? 0 : "auto" }}>
+                      <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 236, minHeight: areaList.length > 0 ? 0 : "auto" }}>
                         {areaList.filter((r) => editingId !== r.id).map((r) => {
                           const occ = occupantsOf(r.id);
                           const cap = Number(r.capacity) || 0;
