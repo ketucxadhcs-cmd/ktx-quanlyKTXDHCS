@@ -89,7 +89,7 @@ const FONT_STYLE = `
   background-size: 14px 14px;
 }
 .stamp-border { border: 1.5px solid ${T.gold}; }
-.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: ${T.green}; border-radius: 4px; }
 .card-sheet {
   box-shadow: 0 2px 6px rgba(19,31,25,0.08), 0 14px 30px -14px rgba(19,31,25,0.22);
@@ -1639,23 +1639,27 @@ function RoomsTab({ perm }) {
                 {areaGroups.length > 1 && (
                   <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
                 )}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {areaList.map((r) => {
+              {areaList.some((r) => editingId === r.id) && (
+                <div className="mb-2">
+                  {areaList.filter((r) => editingId === r.id).map((r) => (
+                    <RoomForm
+                      key={r.id}
+                      initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "", imageUrl: r.imageUrl || "" }}
+                      warn={warn}
+                      onCancel={() => setEditingId(null)}
+                      onSave={saveEdit}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="overflow-x-auto pb-1.5 scrollbar-thin">
+              <div
+                className="grid gap-2"
+                style={{ gridAutoFlow: "column", gridTemplateRows: "repeat(2, minmax(0, 1fr))", gridAutoColumns: "208px", alignItems: "start" }}
+              >
+                {areaList.filter((r) => editingId !== r.id).map((r) => {
                   const occ = occupantsOf(r.id);
                   const cap = Number(r.capacity) || 0;
-                  const isEditing = editingId === r.id;
-                  if (isEditing) {
-                    return (
-                      <div key={r.id} className="sm:col-span-2 lg:col-span-3">
-                        <RoomForm
-                          initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "", imageUrl: r.imageUrl || "" }}
-                          warn={warn}
-                          onCancel={() => setEditingId(null)}
-                          onSave={saveEdit}
-                        />
-                      </div>
-                    );
-                  }
                   return (
                     <div key={r.id} className="stamp-border card-item p-3" style={{ background: "#fff" }}>
                       <div className="flex items-start justify-between gap-2">
@@ -1751,6 +1755,7 @@ function RoomsTab({ perm }) {
                     </div>
                   );
                 })}
+              </div>
               </div>
               </div>
               ))}
