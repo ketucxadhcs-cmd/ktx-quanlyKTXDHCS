@@ -1195,13 +1195,20 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
 /* ============================================================
    TAB: TỔNG QUAN
    ============================================================ */
-function DashboardTab({ perm }) {
+function DashboardTab({ perm, onNavigate }) {
   const { items: rooms, loading: roomsLoading } = useSharedList("rooms");
   const { items: students, loading: studentsLoading } = useSharedList("students");
   const { items: maint, loading: maintLoading } = useSharedList("maintenance");
   const { items: assets, loading: assetsLoading } = useSharedList("assets");
 
   const loading = roomsLoading || studentsLoading || maintLoading || assetsLoading;
+
+  // Chỉ cho bấm sang mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
+  const goIfAllowed = (tabId) => {
+    if (!onNavigate) return undefined;
+    if (!(TAB_ROLES[tabId] || []).includes(perm.role)) return undefined;
+    return () => onNavigate(tabId);
+  };
 
   const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
   const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
@@ -1215,8 +1222,15 @@ function DashboardTab({ perm }) {
   const pendingMaint = maint.filter((m) => m.status === "Chờ xử lý" || m.status === "Đang xử lý").length;
   const brokenAssets = assets.filter((a) => a.status === "Hỏng").length;
 
-  const StatCard = ({ icon: Icon, label, value, accent }) => (
-    <div className="stamp-border p-4 card-item" style={{ background: "#fff" }}>
+  const StatCard = ({ icon: Icon, label, value, accent, onClick }) => (
+    <div
+      className={`stamp-border p-4 card-item ${onClick ? "cursor-pointer" : ""}`}
+      style={{ background: "#fff" }}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    >
       <div className="flex items-center gap-2 mb-2">
         <span className="icon-badge" style={{ background: accent || T.green, color: "#fff" }}><Icon size={14} /></span>
         <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.inkSoft }}>{label}</span>
@@ -1247,16 +1261,16 @@ function DashboardTab({ perm }) {
       {loading ? <LoadingRow /> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} />
-            <StatCard icon={Building2} label="Tổng số phòng" value={rooms.length} />
-            <StatCard icon={BedDouble} label="Phòng đang sử dụng" value={byStatus["Đang ở"] || 0} accent={T.amberDark} />
-            <StatCard icon={DoorOpen} label="Phòng còn trống" value={byStatus["Trống"] || 0} accent={T.green} />
+            <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} onClick={goIfAllowed("students")} />
+            <StatCard icon={Building2} label="Tổng số phòng" value={rooms.length} onClick={goIfAllowed("rooms")} />
+            <StatCard icon={BedDouble} label="Phòng đang sử dụng" value={byStatus["Đang ở"] || 0} accent={T.amberDark} onClick={goIfAllowed("rooms")} />
+            <StatCard icon={DoorOpen} label="Phòng còn trống" value={byStatus["Trống"] || 0} accent={T.green} onClick={goIfAllowed("rooms")} />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <StatCard icon={Wrench} label="Phòng bảo trì" value={byStatus["Đang bảo trì"] || 0} accent={T.red} />
-            <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} />
-            <StatCard icon={AlertTriangle} label="Tài sản hỏng" value={brokenAssets} accent={T.red} />
-            <StatCard icon={AlertTriangle} label="SV chưa xếp phòng" value={unassigned} accent={T.amberDark} />
+            <StatCard icon={Wrench} label="Phòng bảo trì" value={byStatus["Đang bảo trì"] || 0} accent={T.red} onClick={goIfAllowed("rooms")} />
+            <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} onClick={goIfAllowed("maintenance")} />
+            <StatCard icon={AlertTriangle} label="Tài sản hỏng" value={brokenAssets} accent={T.red} onClick={goIfAllowed("assets")} />
+            <StatCard icon={AlertTriangle} label="SV chưa xếp phòng" value={unassigned} accent={T.amberDark} onClick={goIfAllowed("assignment")} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -4108,9 +4122,9 @@ export default function App() {
     const allowedForTab = isReportsOrAdminTab
       ? (tab === "reports" ? perm.canManage : perm.isAdmin)
       : (TAB_ROLES[tab] || []).includes(perm.role);
-    if (!allowedForTab) return <DashboardTab perm={perm} />;
+    if (!allowedForTab) return <DashboardTab perm={perm} onNavigate={goToTab} />;
     switch (tab) {
-      case "home": return <DashboardTab perm={perm} />;
+      case "home": return <DashboardTab perm={perm} onNavigate={goToTab} />;
       case "rooms": return <RoomsTab perm={perm} />;
       case "students": return <StudentsTab perm={perm} user={user} />;
       case "assignment": return <AssignmentTab perm={perm} />;
