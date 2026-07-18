@@ -698,6 +698,8 @@ function LoginGate({ onLogin }) {
    DỮ LIỆU DÙNG CHUNG: PHÒNG Ở, SINH VIÊN, TÀI SẢN, BẢO TRÌ
    ============================================================ */
 const ROOM_STATUS = ["Trống", "Đang ở", "Đang bảo trì"];
+const MAINTENANCE_REASONS = ["Học viên nghỉ lễ/Tết", "Học viên nghỉ hè", "Học viên đi thực tập", "Phòng hư hỏng cần sửa gấp", "Lý do khác"];
+const TRANSFER_REASONS = ["Phòng hư hỏng cần sửa", "Gộp phòng do ít người", "Học viên nghỉ lễ/Tết", "Học viên nghỉ hè", "Học viên đi thực tập", "Lý do khác"];
 const GENDER_OPTIONS = ["Nam", "Nữ"];
 const NAM_HOC_OPTIONS = ["Năm 1", "Năm 2", "Năm 3", "Năm 4"];
 const ASSET_CATEGORY = ["Điện", "Nước", "Cơ sở vật chất"];
@@ -1614,6 +1616,10 @@ function RoomsTab({ perm }) {
   const [expandedId, setExpandedId] = useState(null);
   const [mergeFrom, setMergeFrom] = useState(null);
   const [mergeTarget, setMergeTarget] = useState("");
+  const [mergeReason, setMergeReason] = useState("");
+  const [maintTarget, setMaintTarget] = useState(null); // Phòng đang có SV ở, đang chờ xác nhận lý do trước khi đánh dấu bảo trì
+  const [maintReason, setMaintReason] = useState("");
+  const [maintNote, setMaintNote] = useState("");
   const [renamingBuilding, setRenamingBuilding] = useState(null); // Tên toà nhà (cũ) đang được đổi tên inline
   const [renameValue, setRenameValue] = useState("");
   const [viewStudentId, setViewStudentId] = useState(null); // Đang xem đầy đủ thông tin 1 học viên trong phòng
@@ -1643,7 +1649,19 @@ function RoomsTab({ perm }) {
     await setRooms(rooms.filter((r) => r.id !== id));
   };
   const toggleStatus = async (r, status) => {
-    await setRooms(rooms.map((x) => (x.id === r.id ? { ...x, status } : x)));
+    await setRooms(rooms.map((x) => (x.id === r.id ? { ...x, status, ...(status !== "Đang bảo trì" ? { maintenanceReason: "", maintenanceNote: "" } : {}) } : x)));
+  };
+
+  // Phòng còn sinh viên thì không cho đánh dấu bảo trì ngay — bắt buộc chọn lý do (SV đang nghỉ lễ/Tết/hè,
+  // đi thực tập, phòng hư hỏng gấp...) hoặc dồn sinh viên sang phòng khác trước. Phòng đã trống thì đánh dấu luôn.
+  const requestMaintenance = (r) => {
+    if (occupantsOf(r.id).length === 0) { toggleStatus(r, "Đang bảo trì"); return; }
+    setMaintTarget(r); setMaintReason(""); setMaintNote("");
+  };
+  const confirmMaintenance = async () => {
+    if (!maintTarget || !maintReason) return;
+    await setRooms(rooms.map((x) => (x.id === maintTarget.id ? { ...x, status: "Đang bảo trì", maintenanceReason: maintReason, maintenanceNote: maintNote } : x)));
+    setMaintTarget(null); setMaintReason(""); setMaintNote("");
   };
 
   // Đổi tên toà nhà — sửa lỗi chính tả/sai sót mà không phải sửa tay từng phòng.
@@ -1662,6 +1680,7 @@ function RoomsTab({ perm }) {
 
   const doMerge = async () => {
     if (!mergeFrom || !mergeTarget) return;
+    if (!mergeReason) { reportGlobalError("Vui lòng chọn lý do dồn phòng trước khi xác nhận."); return; }
     const target = rooms.find((r) => r.id === Number(mergeTarget));
     if (!target) return;
     const moving = occupantsOf(mergeFrom.id);
@@ -1672,10 +1691,12 @@ function RoomsTab({ perm }) {
       return;
     }
     const movingIds = new Set(moving.map((s) => s.id));
-    await setStudents(students.map((s) => (movingIds.has(s.id) ? { ...s, roomId: target.id, bed: "" } : s)));
-    await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống" } : r)));
+    const reasonNote = `Dồn phòng ngày ${new Date().toLocaleDateString("vi-VN")} từ ${roomLabel(mergeFrom)} — Lý do: ${mergeReason}`;
+    await setStudents(students.map((s) => (movingIds.has(s.id) ? { ...s, roomId: target.id, bed: "", note: s.note ? `${s.note} | ${reasonNote}` : reasonNote } : s)));
+    await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống", maintenanceReason: "", maintenanceNote: "" } : r)));
     setMergeFrom(null);
     setMergeTarget("");
+    setMergeReason("");
   };
 
   const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
@@ -1860,6 +1881,11 @@ function RoomsTab({ perm }) {
                                 Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
                               </div>
                               {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
+                              {r.status === "Đang bảo trì" && r.maintenanceReason && (
+                                <div className="f-body text-[11px] mt-1" style={{ color: T.red }}>
+                                  Lý do bảo trì: <b>{r.maintenanceReason}</b>{r.maintenanceNote ? ` — ${r.maintenanceNote}` : ""}
+                                </div>
+                              )}
 
                               {r.imageUrl && (
                                 <div className="mt-2 relative group">
@@ -1964,7 +1990,7 @@ function RoomsTab({ perm }) {
                                   <button onClick={() => setEditingId(r.id)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
                                   <button onClick={() => removeRoom(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
                                   {r.status !== "Đang bảo trì" ? (
-                                    <button className="f-mono text-[10px] underline" style={{ color: T.red }} onClick={() => toggleStatus(r, "Đang bảo trì")}>Đánh dấu bảo trì</button>
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.red }} onClick={() => requestMaintenance(r)}>Đánh dấu bảo trì</button>
                                   ) : (
                                     <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
                                   )}
@@ -1989,7 +2015,7 @@ function RoomsTab({ perm }) {
       )}
 
       {mergeFrom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => setMergeFrom(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => { setMergeFrom(null); setMergeReason(""); }}>
           <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
             <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
               Dồn phòng {roomLabel(mergeFrom)}
@@ -2005,9 +2031,44 @@ function RoomsTab({ perm }) {
                 ))}
               </select>
             </Field>
+            <Field label="Lý do chuyển phòng" required>
+              <select className={inputCls} style={inputStyle} value={mergeReason} onChange={(e) => setMergeReason(e.target.value)}>
+                <option value="">— Chọn lý do —</option>
+                {TRANSFER_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </Field>
             <div className="flex gap-2 mt-2">
-              <Btn onClick={doMerge} disabled={!mergeTarget}>Xác nhận dồn phòng</Btn>
-              <Btn variant="outline" onClick={() => setMergeFrom(null)}>Huỷ</Btn>
+              <Btn onClick={doMerge} disabled={!mergeTarget || !mergeReason}>Xác nhận dồn phòng</Btn>
+              <Btn variant="outline" onClick={() => { setMergeFrom(null); setMergeReason(""); }}>Huỷ</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => setMaintTarget(null)}>
+          <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.red }}>
+              Phòng đang có sinh viên ở
+            </div>
+            <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+              {roomLabel(maintTarget)} hiện có <b>{occupantsOf(maintTarget.id).length}</b> sinh viên. Nếu phòng cần sửa gấp và phải chuyển sinh viên đi nơi khác,
+              hãy đóng hộp này và dùng <b>"Dồn phòng…"</b> để chuyển sinh viên trước. Nếu sinh viên vẫn giữ chỗ (VD: đang nghỉ lễ/Tết/hè, đi thực tập) và bạn chỉ
+              cần đánh dấu để theo dõi bảo trì, hãy chọn lý do bên dưới rồi xác nhận.
+            </p>
+            <Field label="Lý do đánh dấu bảo trì" required>
+              <select className={inputCls} style={inputStyle} value={maintReason} onChange={(e) => setMaintReason(e.target.value)}>
+                <option value="">— Chọn lý do —</option>
+                {MAINTENANCE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </Field>
+            <Field label="Ghi chú thêm (không bắt buộc)">
+              <input className={inputCls} style={inputStyle} value={maintNote} onChange={(e) => setMaintNote(e.target.value)} placeholder="VD: dự kiến sửa xong 25/7…" />
+            </Field>
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <Btn onClick={confirmMaintenance} disabled={!maintReason}>Xác nhận đánh dấu bảo trì</Btn>
+              <Btn variant="outline" onClick={() => { const r = maintTarget; setMaintTarget(null); setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng cho SV trước</Btn>
+              <Btn variant="outline" onClick={() => setMaintTarget(null)}>Huỷ</Btn>
             </div>
           </div>
         </div>
