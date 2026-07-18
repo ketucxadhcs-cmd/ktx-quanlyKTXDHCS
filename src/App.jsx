@@ -3933,6 +3933,18 @@ export default function App() {
 
   const { perm, permissions, setPermissions, permLoading } = useRole(user, isAdminLogin);
 
+  // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
+  // đổi quyền của mình, hoặc Học viên lỡ đứng ở mục không dành cho mình), tự động đưa về Tổng quan.
+  // Đặt TRƯỚC "if (!user) return" để không vi phạm Rules of Hooks (số lượng hook phải giống nhau mỗi lần render).
+  useEffect(() => {
+    if (!user) return;
+    const allowed = tab === "reports" ? perm.canManage
+      : (tab === "password" || tab === "permissions") ? perm.isAdmin
+      : (TAB_ROLES[tab] || []).includes(perm.role);
+    if (!allowed) setTab("home");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perm.role, user]);
+
   if (!user) return <LoginGate onLogin={(name, admin) => { setUser(name); setIsAdminLogin(!!admin); }} />;
 
   const roleBadge = { admin: "Quản trị", can_bo: "Cán bộ quản lý", ky_thuat: "Kỹ thuật", sinh_vien: "Học viên" };
@@ -3976,13 +3988,6 @@ export default function App() {
   ];
   const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
   const RoleIcon = roleIcon[perm.role] || Users;
-
-  // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
-  // đổi quyền của mình), tự động đưa về Tổng quan thay vì hiện trang trống hoặc dữ liệu không nên thấy.
-  useEffect(() => {
-    if (!visibleTabs.some((t) => t.id === tab)) setTab("home");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perm.role]);
 
   return (
     <div className="min-h-screen paper-tex f-body" style={{ color: T.ink }}>
