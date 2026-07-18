@@ -10,7 +10,7 @@ import { db } from "./firebase";
 import crest from "./assets/crest.png";
 
 /* ============ THEME =============
-   Nền hồ sơ giấy cũ, xanh cảnh phục, vàng CSGT, đỏ hiệu lệnh, vàng sao.
+   Nền hồ sơ giấy cũ, xanh nước biển, vàng CSGT, đỏ hiệu lệnh, vàng sao.
    Display: Oswald (nhãn, tiêu đề, kiểu bảng công vụ)
    Body: Be Vietnam Pro (đọc tiếng Việt tốt)
    Mono: Roboto Mono (số hiệu, ngày tháng, mã số)
@@ -18,14 +18,14 @@ import crest from "./assets/crest.png";
 const T = {
   paper: "#F7F3E7",
   paperDark: "#ECE4D0",
-  green: "#2D4B3B",
-  greenDark: "#1C2E24",
+  green: "#1F5573",
+  greenDark: "#123145",
   amber: "#E8AE4C",
   amberDark: "#C28F35",
   red: "#B23347",
   gold: "#D4AF37",
-  ink: "#2A2E27",
-  inkSoft: "#6B6F60",
+  ink: "#22282C",
+  inkSoft: "#636B6F",
   selectBg: "#FBEACB",
   selectBorder: "#B9822A",
 };
@@ -90,11 +90,18 @@ const FONT_STYLE = `
 }
 .stamp-border { border: 1.5px solid ${T.gold}; }
 input[type="checkbox"], input[type="radio"] { accent-color: ${T.amberDark}; }
+html { scrollbar-width: thin; scrollbar-color: ${T.amberDark} ${T.paper}; }
+html::-webkit-scrollbar { width: 10px; height: 10px; }
+html::-webkit-scrollbar-track { background: ${T.paper} !important; }
+html::-webkit-scrollbar-thumb { background: ${T.amberDark} !important; border-radius: 6px; border: 2px solid ${T.paper}; }
+html::-webkit-scrollbar-thumb:hover { background: ${T.amber} !important; }
+html::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: ${T.amberDark} ${T.paper}; }
 .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
 .scrollbar-thin::-webkit-scrollbar-track { background: ${T.paper} !important; border-radius: 4px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: ${T.amberDark} !important; border-radius: 4px; border: 1px solid ${T.paper}; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: ${T.amber} !important; }
+.scrollbar-thin::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .card-sheet {
   box-shadow: 0 2px 6px rgba(19,31,25,0.08), 0 14px 30px -14px rgba(19,31,25,0.22);
 }
