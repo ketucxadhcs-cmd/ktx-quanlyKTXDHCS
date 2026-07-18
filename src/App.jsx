@@ -26,11 +26,11 @@ const T = {
   gold: "#D4AF37",
   ink: "#2A2E27",
   inkSoft: "#6B6F60",
-  selectBg: "#DCEAFC",
-  selectBorder: "#2F6FBF",
+  selectBg: "#FBEACB",
+  selectBorder: "#B9822A",
 };
 
-// Trộn thêm hiệu ứng tô xanh nước biển khi dòng đang được chọn (dùng chung cho mọi danh sách)
+// Trộn thêm hiệu ứng tô vàng hổ phách khi dòng đang được chọn (dùng chung cho mọi danh sách)
 function withSelect(style, selected) {
   return selected
     ? { ...style, background: T.selectBg, boxShadow: `inset 0 0 0 2px ${T.selectBorder}` }
@@ -89,8 +89,12 @@ const FONT_STYLE = `
   background-size: 14px 14px;
 }
 .stamp-border { border: 1.5px solid ${T.gold}; }
-.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: ${T.green}; border-radius: 4px; }
+input[type="checkbox"], input[type="radio"] { accent-color: ${T.amberDark}; }
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: ${T.amberDark} ${T.paper}; }
+.scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: ${T.paper} !important; border-radius: 4px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: ${T.amberDark} !important; border-radius: 4px; border: 1px solid ${T.paper}; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: ${T.amber} !important; }
 .card-sheet {
   box-shadow: 0 2px 6px rgba(19,31,25,0.08), 0 14px 30px -14px rgba(19,31,25,0.22);
 }
@@ -929,6 +933,32 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
   const toggleRow = (i) => setSelectedRows((s) => ({ ...s, [i]: !s[i] }));
   const checkedCount = Object.values(selectedRows).filter(Boolean).length;
 
+  // Chọn nhanh theo tiêu chí — chọn tất cả, hoặc lọc theo Khoá / Lớp (Trung đội) / Năm học rồi tick hàng loạt.
+  const [qKhoa, setQKhoa] = useState("");
+  const [qLop, setQLop] = useState("");
+  const [qNamHoc, setQNamHoc] = useState("");
+  const uniqSorted = (vals) => [...new Set(vals.map((v) => (v || "").trim()).filter(Boolean))].sort(naturalCompare);
+  const khoaOptions = uniqSorted(previewRows.map((r) => r.khoa));
+  const lopOptions = uniqSorted(previewRows.map((r) => r.lop));
+  const namHocOptions = uniqSorted(previewRows.map((r) => r.namHoc));
+  const matchesQuick = (r) =>
+    (!qKhoa || (r.khoa || "").trim() === qKhoa) &&
+    (!qLop || (r.lop || "").trim() === qLop) &&
+    (!qNamHoc || (r.namHoc || "").trim() === qNamHoc);
+  const quickMatchCount = previewRows.filter((r) => r.name && matchesQuick(r)).length;
+  const selectAllRows = () => setSelectedRows(previewRows.reduce((acc, r, i) => { acc[i] = Boolean(r.name); return acc; }, {}));
+  const clearAllRows = () => setSelectedRows({});
+  const selectByQuick = () => setSelectedRows((s) => {
+    const next = { ...s };
+    previewRows.forEach((r, i) => { if (r.name && matchesQuick(r)) next[i] = true; });
+    return next;
+  });
+  const deselectByQuick = () => setSelectedRows((s) => {
+    const next = { ...s };
+    previewRows.forEach((r, i) => { if (matchesQuick(r)) next[i] = false; });
+    return next;
+  });
+
   const confirmImport = () => {
     const chosen = previewRows.filter((r, i) => selectedRows[i] && r.name);
     if (chosen.length === 0) return;
@@ -1043,6 +1073,47 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
             <span className="f-mono text-[11px] uppercase tracking-widest" style={{ color: T.amberDark }}>
               Xem trước — tick chọn dòng cần lấy ({checkedCount}/{previewRows.length})
             </span>
+          </div>
+
+          <div className="stamp-border p-2.5 mb-2.5 flex flex-wrap items-end gap-2" style={{ background: T.paper }}>
+            <div className="flex gap-1.5">
+              <Btn size="sm" variant="outline" onClick={selectAllRows}>Chọn tất cả</Btn>
+              <Btn size="sm" variant="outline" onClick={clearAllRows}>Bỏ chọn tất cả</Btn>
+            </div>
+            <div className="w-px self-stretch mx-0.5" style={{ background: T.paperDark }} />
+            {khoaOptions.length > 0 && (
+              <div>
+                <div className="f-body text-[9.5px] uppercase tracking-wider mb-0.5" style={{ color: T.inkSoft }}>Khoá</div>
+                <select className={inputCls} style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px", width: "auto" }} value={qKhoa} onChange={(e) => setQKhoa(e.target.value)}>
+                  <option value="">— Tất cả —</option>
+                  {khoaOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            )}
+            {lopOptions.length > 0 && (
+              <div>
+                <div className="f-body text-[9.5px] uppercase tracking-wider mb-0.5" style={{ color: T.inkSoft }}>Lớp / Trung đội</div>
+                <select className={inputCls} style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px", width: "auto" }} value={qLop} onChange={(e) => setQLop(e.target.value)}>
+                  <option value="">— Tất cả —</option>
+                  {lopOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            )}
+            {namHocOptions.length > 0 && (
+              <div>
+                <div className="f-body text-[9.5px] uppercase tracking-wider mb-0.5" style={{ color: T.inkSoft }}>Năm học</div>
+                <select className={inputCls} style={{ ...inputStyle, fontSize: "11.5px", padding: "4px 6px", width: "auto" }} value={qNamHoc} onChange={(e) => setQNamHoc(e.target.value)}>
+                  <option value="">— Tất cả —</option>
+                  {namHocOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            )}
+            {(khoaOptions.length > 0 || lopOptions.length > 0 || namHocOptions.length > 0) && (
+              <div className="flex gap-1.5 items-center">
+                <Btn size="sm" onClick={selectByQuick} disabled={!qKhoa && !qLop && !qNamHoc}>Chọn theo tiêu chí ({quickMatchCount})</Btn>
+                <Btn size="sm" variant="outline" onClick={deselectByQuick} disabled={!qKhoa && !qLop && !qNamHoc}>Bỏ chọn tiêu chí</Btn>
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto overflow-y-auto stamp-border" style={{ background: "#fff", maxHeight: 320 }}>
             <table className="w-full text-xs f-body table-lines table-grid">
