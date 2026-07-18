@@ -1633,6 +1633,39 @@ function RoomsTab({ perm }) {
     setSwapStudent(null);
   };
 
+  // Gán giường cho những học viên đang ở trong phòng nhưng chưa có số giường (dữ liệu cũ nhập tay/import
+  // trước đây bỏ trống) — chọn giường trống nhỏ nhất còn lại trong đúng phòng của từng người.
+  const autoAssignRoomBeds = async (room) => {
+    const occ = students.filter((s) => s.roomId === room.id && s.status !== "Đã trả phòng");
+    const usedBeds = new Set(occ.map((s) => String(s.bed)).filter(Boolean));
+    const updates = {};
+    occ.filter((s) => !s.bed).forEach((s) => {
+      const bed = pickFreeBed(room.capacity, usedBeds);
+      if (bed) { updates[s.id] = bed; usedBeds.add(bed); }
+    });
+    if (Object.keys(updates).length === 0) return;
+    await setStudents(students.map((s) => (updates[s.id] ? { ...s, bed: updates[s.id] } : s)));
+  };
+  // Quét toàn bộ ký túc xá, gán giường còn thiếu cho mọi phòng cùng lúc.
+  const autoAssignAllBeds = async () => {
+    const usedBedsByRoom = {};
+    rooms.forEach((r) => {
+      usedBedsByRoom[r.id] = new Set(
+        students.filter((s) => s.roomId === r.id && s.status !== "Đã trả phòng").map((s) => String(s.bed)).filter(Boolean)
+      );
+    });
+    const updates = {};
+    students.forEach((s) => {
+      if (!s.roomId || s.status === "Đã trả phòng" || s.bed) return;
+      const room = rooms.find((r) => r.id === s.roomId);
+      if (!room) return;
+      const bed = pickFreeBed(room.capacity, usedBedsByRoom[room.id] || new Set());
+      if (bed) { updates[s.id] = bed; (usedBedsByRoom[room.id] || (usedBedsByRoom[room.id] = new Set())).add(bed); }
+    });
+    if (Object.keys(updates).length === 0) return;
+    await setStudents(students.map((s) => (updates[s.id] ? { ...s, bed: updates[s.id] } : s)));
+  };
+
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
 
   const occupantsOf = (roomId) => students.filter((s) => s.roomId === roomId && s.status !== "Đã trả phòng");
@@ -1751,6 +1784,7 @@ function RoomsTab({ perm }) {
       <SectionHeader compact icon={Building2} eyebrow={`Tổng số phòng: ${rooms.length}`} title="Danh sách phòng"
         action={perm.canManage && (
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Btn size="sm" variant="outline" onClick={autoAssignAllBeds}><Repeat size={14} /> Gán giường còn thiếu</Btn>
             <Btn size="sm" variant="outline" onClick={() => setShowImport((s) => !s)}><Upload size={14} /> Nhập từ Excel/CSV</Btn>
             <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm phòng</Btn>
           </div>
@@ -1954,7 +1988,19 @@ function RoomsTab({ perm }) {
                                   )}
                                   {occ.some((s) => !s.bed) && (
                                     <div className="mb-1">
-                                      <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Chưa gán số giường</div>
+                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                        <div className="f-mono text-[9.5px] uppercase tracking-widest" style={{ color: T.inkSoft }}>Chưa gán số giường</div>
+                                        {perm.canManage && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); autoAssignRoomBeds(r); }}
+                                            className="f-mono text-[10px] underline shrink-0"
+                                            style={{ color: T.amberDark }}
+                                          >
+                                            Gán giường tự động
+                                          </button>
+                                        )}
+                                      </div>
                                       <ul className="space-y-0.5">
                                         {occ.filter((s) => !s.bed).map((s) => (
                                           <li key={s.id} className="f-body text-[11.5px] flex items-center justify-between" style={{ color: T.ink }}>
