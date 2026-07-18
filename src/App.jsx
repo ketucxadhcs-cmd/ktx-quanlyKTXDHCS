@@ -3,7 +3,7 @@ import {
   Shield, Users, DoorOpen, Wrench, Boxes, FolderOpen, LogOut, Plus, Trash2, Star,
   ChevronRight, Loader2, X, ClipboardCheck, CheckCircle2, Circle, Paperclip, MapPin,
   Image as ImageIcon, Menu, KeyRound, Pencil, Search, Eye, EyeOff, Upload, FileSpreadsheet,
-  ArrowRightLeft, LayoutGrid, Building2, BedDouble, AlertTriangle, Bell, Zap,
+  ArrowRightLeft, LayoutGrid, Building2, BedDouble, AlertTriangle, Bell, Zap, Repeat,
 } from "lucide-react";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
@@ -1623,6 +1623,15 @@ function RoomsTab({ perm }) {
   const [renamingBuilding, setRenamingBuilding] = useState(null); // Tên toà nhà (cũ) đang được đổi tên inline
   const [renameValue, setRenameValue] = useState("");
   const [viewStudentId, setViewStudentId] = useState(null); // Đang xem đầy đủ thông tin 1 học viên trong phòng
+  const [swapStudent, setSwapStudent] = useState(null); // Đang đổi giường cho học viên này với 1 bạn cùng phòng
+  const confirmSwap = async (a, b) => {
+    await setStudents(students.map((s) => {
+      if (s.id === a.id) return { ...s, bed: b.bed };
+      if (s.id === b.id) return { ...s, bed: a.bed };
+      return s;
+    }));
+    setSwapStudent(null);
+  };
 
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
 
@@ -1967,16 +1976,27 @@ function RoomsTab({ perm }) {
                                       </div>
                                       <ul className="space-y-1">
                                         {occ.map((s) => (
-                                          <li key={s.id}>
+                                          <li key={s.id} className="flex items-center gap-1">
                                             <button
                                               type="button"
                                               onClick={(e) => { e.stopPropagation(); setViewStudentId(s.id); }}
-                                              className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm text-left btn-press"
+                                              className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm text-left btn-press"
                                               style={{ background: "rgba(31,51,40,0.04)", border: `1px solid ${T.paperDark}` }}
                                             >
                                               <span className="f-body text-[11.5px] font-medium truncate" style={{ color: T.green }}>{s.name}</span>
                                               <span className="f-mono text-[10px] shrink-0" style={{ color: T.inkSoft }}>{s.lop || s.msv || ""}{s.bed ? ` · G${s.bed}` : ""}</span>
                                             </button>
+                                            {perm.canManage && occ.length > 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); setSwapStudent(s); }}
+                                                title="Đổi giường với bạn cùng phòng"
+                                                className="shrink-0 p-1.5 rounded-sm btn-press"
+                                                style={{ border: `1px solid ${T.paperDark}` }}
+                                              >
+                                                <Repeat size={12} style={{ color: T.amberDark }} />
+                                              </button>
+                                            )}
                                           </li>
                                         ))}
                                       </ul>
@@ -2107,6 +2127,10 @@ function RoomsTab({ perm }) {
           </div>
         </div>
       )}
+
+      {swapStudent && (
+        <SwapBedModal student={swapStudent} students={students} rooms={rooms} onClose={() => setSwapStudent(null)} onConfirm={confirmSwap} />
+      )}
     </div>
   );
 }
@@ -2122,6 +2146,20 @@ function TransferModal({ student, rooms, students, onClose, onConfirm }) {
   const occupantsOf = (rid) => students.filter((s) => s.roomId === rid && s.status !== "Đã trả phòng" && s.id !== student.id);
   const chosenRoom = rooms.find((r) => r.id === Number(roomId));
 
+  // Khi chọn phòng, tự động gán luôn giường trống nhỏ nhất còn lại — không để trống chờ gán tay như trước.
+  // Vẫn cho sửa tay số giường (VD học viên muốn đổi giường cho nhau) nên input không bị khoá cứng.
+  const handleRoomChange = (val) => {
+    setRoomId(val);
+    setErr("");
+    const room = rooms.find((r) => r.id === Number(val));
+    if (room) {
+      const usedBeds = new Set(occupantsOf(room.id).map((s) => String(s.bed)).filter(Boolean));
+      setBed(pickFreeBed(room.capacity, usedBeds));
+    } else {
+      setBed("");
+    }
+  };
+
   const confirm = () => {
     if (!roomId) { setErr("Vui lòng chọn phòng."); return; }
     const room = rooms.find((r) => r.id === Number(roomId));
@@ -2129,6 +2167,7 @@ function TransferModal({ student, rooms, students, onClose, onConfirm }) {
     const occ = occupantsOf(room.id);
     if (room.capacity && occ.length >= Number(room.capacity)) { setErr("Phòng đã đủ số chỗ, chọn phòng khác."); return; }
     if (room.gender && student.gender && room.gender !== student.gender) { setErr(`Phòng này chỉ dành cho giới tính "${room.gender}", không khớp với sinh viên (${student.gender}).`); return; }
+    if (bed && occ.some((o) => String(o.bed) === String(bed))) { setErr(`Giường ${bed} đã có người ở, vui lòng chọn số giường khác (hoặc dùng "Đổi giường" để hoán đổi trực tiếp).`); return; }
     onConfirm(room.id, bed);
   };
 
@@ -2140,14 +2179,14 @@ function TransferModal({ student, rooms, students, onClose, onConfirm }) {
         </div>
         <FormWarning message={err} />
         <Field label="Phòng mới" required>
-          <select className={inputCls} style={inputStyle} value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+          <select className={inputCls} style={inputStyle} value={roomId} onChange={(e) => handleRoomChange(e.target.value)}>
             <option value="">— Chọn phòng —</option>
             {rooms.map((r) => (
               <option key={r.id} value={r.id}>{roomLabel(r)} · {r.gender || "Nam"} ({occupantsOf(r.id).length}/{r.capacity || "—"})</option>
             ))}
           </select>
         </Field>
-        <Field label="Số giường (tuỳ chọn)">
+        <Field label="Số giường (đã tự gán, có thể sửa tay nếu cần)">
           <input className={inputCls} style={inputStyle} value={bed} onChange={(e) => setBed(e.target.value)} placeholder="VD: 2" />
         </Field>
         {chosenRoom?.status === "Đang bảo trì" && (
@@ -2155,6 +2194,48 @@ function TransferModal({ student, rooms, students, onClose, onConfirm }) {
         )}
         <div className="flex gap-2 mt-2">
           <Btn onClick={confirm}>Xác nhận chuyển phòng</Btn>
+          <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Đổi giường cho nhau giữa 2 sinh viên đang ở cùng 1 phòng — dùng khi học viên báo muốn hoán đổi chỗ nằm.
+function SwapBedModal({ student, students, rooms, onClose, onConfirm }) {
+  const room = rooms.find((r) => r.id === student.roomId);
+  const others = students.filter((s) => s.roomId === student.roomId && s.status !== "Đã trả phòng" && s.id !== student.id);
+  const [targetId, setTargetId] = useState("");
+  const target = others.find((s) => String(s.id) === String(targetId)) || null;
+
+  const confirm = () => {
+    if (!target) return;
+    onConfirm(student, target);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={onClose}>
+      <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+        <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
+          Đổi giường — {student.name}
+        </div>
+        <div className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+          Đang ở {room ? roomLabel(room) : "—"}{student.bed ? ` · Giường ${student.bed}` : " · chưa gán giường"}. Chọn bạn cùng phòng muốn hoán đổi giường — hệ thống sẽ tự đổi số giường qua lại cho cả hai.
+        </div>
+        {others.length === 0 ? (
+          <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Phòng này chưa có sinh viên nào khác để đổi giường.</div>
+        ) : (
+          <Field label="Đổi giường với" required>
+            <select className={inputCls} style={inputStyle} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+              <option value="">— Chọn sinh viên —</option>
+              {others.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} · {s.bed ? `Giường ${s.bed}` : "chưa gán giường"}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <div className="flex gap-2 mt-2">
+          <Btn onClick={confirm} disabled={!target}>Xác nhận đổi giường</Btn>
           <Btn variant="outline" onClick={onClose}>Huỷ</Btn>
         </div>
       </div>
@@ -2177,6 +2258,7 @@ function StudentsTab({ perm, user }) {
   const [filterRoom, setFilterRoom] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [transferTarget, setTransferTarget] = useState(null);
+  const [swapTarget, setSwapTarget] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
 
   const add = async () => {
@@ -2203,6 +2285,16 @@ function StudentsTab({ perm, user }) {
   const confirmTransfer = async (roomId, bed) => {
     await setStudents(students.map((s) => (s.id === transferTarget.id ? { ...s, roomId, bed, status: "Đang ở" } : s)));
     setTransferTarget(null);
+  };
+  // Hoán đổi số giường qua lại giữa 2 sinh viên cùng phòng (báo quản lý muốn đổi chỗ nằm cho nhau).
+  const confirmSwap = async (a, b) => {
+    await setStudents(students.map((s) => {
+      if (s.id === a.id) return { ...s, bed: b.bed };
+      if (s.id === b.id) return { ...s, bed: a.bed };
+      return s;
+    }));
+    setWarn("");
+    setSwapTarget(null);
   };
 
   const q = search.trim().toLowerCase();
@@ -2342,6 +2434,9 @@ function StudentsTab({ perm, user }) {
                       {perm.canManage && (
                         <div className="flex items-center justify-end gap-2 flex-wrap">
                           <button onClick={(e) => { e.stopPropagation(); setTransferTarget(s); }} title="Chuyển phòng"><ArrowRightLeft size={13} style={{ color: T.amberDark }} /></button>
+                          {s.roomId && (
+                            <button onClick={(e) => { e.stopPropagation(); setSwapTarget(s); }} title="Đổi giường với bạn cùng phòng"><Repeat size={13} style={{ color: T.green }} /></button>
+                          )}
                           <button onClick={(e) => { e.stopPropagation(); startEdit(s); }} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
                           {s.roomId && (
                             <button onClick={(e) => { e.stopPropagation(); checkout(s); }} title="Trả phòng"><DoorOpen size={13} style={{ color: T.red }} /></button>
@@ -2360,6 +2455,9 @@ function StudentsTab({ perm, user }) {
 
       {transferTarget && (
         <TransferModal student={transferTarget} rooms={rooms} students={students} onClose={() => setTransferTarget(null)} onConfirm={confirmTransfer} />
+      )}
+      {swapTarget && (
+        <SwapBedModal student={swapTarget} students={students} rooms={rooms} onClose={() => setSwapTarget(null)} onConfirm={confirmSwap} />
       )}
     </div>
   );
