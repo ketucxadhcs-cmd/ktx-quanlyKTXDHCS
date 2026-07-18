@@ -1634,14 +1634,9 @@ function RoomsTab({ perm }) {
                 <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} phòng)</span>
               </div>
               <div className="p-2.5">
-              {areaGroups.map(([area, areaList]) => (
-              <div key={area} className="mb-2.5 last:mb-0">
-                {areaGroups.length > 1 && (
-                  <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
-                )}
-              {areaList.some((r) => editingId === r.id) && (
-                <div className="mb-2">
-                  {areaList.filter((r) => editingId === r.id).map((r) => (
+              {list.some((r) => editingId === r.id) && (
+                <div className="mb-2.5 space-y-2">
+                  {list.filter((r) => editingId === r.id).map((r) => (
                     <RoomForm
                       key={r.id}
                       initial={{ building: r.building, area: r.area || "", roomNumber: r.roomNumber, capacity: r.capacity, gender: r.gender || "Nam", status: r.status || "Trống", note: r.note || "", imageUrl: r.imageUrl || "" }}
@@ -1652,114 +1647,121 @@ function RoomsTab({ perm }) {
                   ))}
                 </div>
               )}
+              {/* Các tầng/khu vực xếp thành cột nằm cạnh nhau (tầng 2 bên phải tầng 1, tầng 3 bên phải tầng 2…),
+                  cuộn ngang để xem hết các tầng. Trong mỗi tầng, phòng xếp dọc từ trên xuống theo số phòng
+                  (101, 102, 103…), cuộn dọc riêng từng tầng nếu tầng có nhiều phòng. */}
               <div className="overflow-x-auto pb-1.5 scrollbar-thin">
-              <div
-                className="grid gap-2"
-                style={{ gridAutoFlow: "column", gridTemplateRows: "repeat(2, minmax(0, 1fr))", gridAutoColumns: "208px", alignItems: "start" }}
-              >
-                {areaList.filter((r) => editingId !== r.id).map((r) => {
-                  const occ = occupantsOf(r.id);
-                  const cap = Number(r.capacity) || 0;
-                  return (
-                    <div key={r.id} className="stamp-border card-item p-3" style={{ background: "#fff" }}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="cursor-pointer" onClick={() => setExpandedId((id) => (id === r.id ? null : r.id))}>
-                          <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
-                          <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{r.area || "—"} · {r.gender || "Nam"}</div>
-                        </div>
-                        <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status || "Trống"], color: "#fff" }}>
-                          {r.status || "Trống"}
-                        </span>
-                      </div>
-                      <div className="f-body text-xs mt-2" style={{ color: T.ink }}>
-                        Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
-                      </div>
-                      {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
-
-                      {r.imageUrl && (
-                        <div className="mt-2 relative group">
-                          <img src={r.imageUrl} alt={`Ảnh phòng ${r.roomNumber}`} className="w-full h-32 object-cover stamp-border" />
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); downloadFileFromUrl(r.imageUrl, `phong-${r.roomNumber}.jpg`); }}
-                            title="Tải ảnh về máy"
-                            className="absolute bottom-1.5 right-1.5 flex items-center gap-1 px-2 py-1 rounded-sm f-mono text-[10px] btn-press"
-                            style={{ background: "rgba(31,51,40,0.85)", color: "#fff", border: "none" }}
-                          >
-                            <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Tải về
-                          </button>
-                        </div>
+                <div className="flex items-start gap-3" style={{ width: "max-content" }}>
+                  {areaGroups.map(([area, areaList]) => (
+                    <div key={area} className="flex-shrink-0" style={{ width: 208 }}>
+                      {areaGroups.length > 1 && (
+                        <div className="f-mono text-[10.5px] uppercase tracking-widest mb-1.5 pl-1" style={{ color: T.inkSoft }}>{area}</div>
                       )}
+                      <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 560 }}>
+                        {areaList.filter((r) => editingId !== r.id).map((r) => {
+                          const occ = occupantsOf(r.id);
+                          const cap = Number(r.capacity) || 0;
+                          return (
+                            <div key={r.id} className="stamp-border card-item p-3" style={{ background: "#fff" }}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="cursor-pointer" onClick={() => setExpandedId((id) => (id === r.id ? null : r.id))}>
+                                  <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
+                                  <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{r.area || "—"} · {r.gender || "Nam"}</div>
+                                </div>
+                                <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status || "Trống"], color: "#fff" }}>
+                                  {r.status || "Trống"}
+                                </span>
+                              </div>
+                              <div className="f-body text-xs mt-2" style={{ color: T.ink }}>
+                                Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
+                              </div>
+                              {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
 
-                      {expandedId === r.id && (
-                        <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-                          <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>Sơ đồ giường</div>
-                          {cap > 0 ? (
-                            <div className="grid grid-cols-2 gap-1.5 mb-2">
-                              {Array.from({ length: cap }, (_, i) => i + 1).map((bedNo) => {
-                                const occByBed = occ.find((s) => String(s.bed) === String(bedNo));
-                                return (
-                                  <div
-                                    key={bedNo}
-                                    className="f-body text-[10.5px] px-2 py-1.5 rounded-sm flex items-center gap-1.5"
-                                    style={{
-                                      background: occByBed ? "#DCEAFC" : "rgba(31,51,40,0.05)",
-                                      border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
-                                    }}
+                              {r.imageUrl && (
+                                <div className="mt-2 relative group">
+                                  <img src={r.imageUrl} alt={`Ảnh phòng ${r.roomNumber}`} className="w-full h-32 object-cover stamp-border" />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); downloadFileFromUrl(r.imageUrl, `phong-${r.roomNumber}.jpg`); }}
+                                    title="Tải ảnh về máy"
+                                    className="absolute bottom-1.5 right-1.5 flex items-center gap-1 px-2 py-1 rounded-sm f-mono text-[10px] btn-press"
+                                    style={{ background: "rgba(31,51,40,0.85)", color: "#fff", border: "none" }}
                                   >
-                                    <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
-                                    <span style={{ color: T.inkSoft }}>G{bedNo}:</span>
-                                    <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
-                                      {occByBed ? occByBed.name : "Trống"}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>Chưa khai báo sức chứa để chia giường.</div>
-                          )}
-                          {occ.some((s) => !s.bed) && (
-                            <div className="mb-1">
-                              <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Chưa gán số giường</div>
-                              <ul className="space-y-0.5">
-                                {occ.filter((s) => !s.bed).map((s) => (
-                                  <li key={s.id} className="f-body text-[11.5px] flex items-center justify-between" style={{ color: T.ink }}>
-                                    <span>{s.name}</span>
-                                    <span className="f-mono text-[10px]" style={{ color: T.inkSoft }}>{s.msv}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                          {occ.length === 0 && cap === 0 && (
-                            <div className="f-body text-[11px] italic" style={{ color: T.inkSoft }}>Chưa có sinh viên nào.</div>
-                          )}
-                        </div>
-                      )}
+                                    <Upload size={11} style={{ transform: "rotate(180deg)" }} /> Tải về
+                                  </button>
+                                </div>
+                              )}
 
-                      {perm.canManage && (
-                        <div className="flex items-center flex-wrap gap-2 mt-3">
-                          <button onClick={() => setEditingId(r.id)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                          <button onClick={() => removeRoom(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
-                          {r.status !== "Đang bảo trì" ? (
-                            <button className="f-mono text-[10px] underline" style={{ color: T.red }} onClick={() => toggleStatus(r, "Đang bảo trì")}>Đánh dấu bảo trì</button>
-                          ) : (
-                            <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
-                          )}
-                          {occ.length > 0 && (
-                            <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => { setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng…</button>
-                          )}
-                        </div>
-                      )}
+                              {expandedId === r.id && (
+                                <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                                  <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>Sơ đồ giường</div>
+                                  {cap > 0 ? (
+                                    <div className="grid grid-cols-2 gap-1.5 mb-2">
+                                      {Array.from({ length: cap }, (_, i) => i + 1).map((bedNo) => {
+                                        const occByBed = occ.find((s) => String(s.bed) === String(bedNo));
+                                        return (
+                                          <div
+                                            key={bedNo}
+                                            className="f-body text-[10.5px] px-2 py-1.5 rounded-sm flex items-center gap-1.5"
+                                            style={{
+                                              background: occByBed ? "#DCEAFC" : "rgba(31,51,40,0.05)",
+                                              border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
+                                            }}
+                                          >
+                                            <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
+                                            <span style={{ color: T.inkSoft }}>G{bedNo}:</span>
+                                            <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
+                                              {occByBed ? occByBed.name : "Trống"}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <div className="f-body text-[11px] italic mb-2" style={{ color: T.inkSoft }}>Chưa khai báo sức chứa để chia giường.</div>
+                                  )}
+                                  {occ.some((s) => !s.bed) && (
+                                    <div className="mb-1">
+                                      <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1" style={{ color: T.inkSoft }}>Chưa gán số giường</div>
+                                      <ul className="space-y-0.5">
+                                        {occ.filter((s) => !s.bed).map((s) => (
+                                          <li key={s.id} className="f-body text-[11.5px] flex items-center justify-between" style={{ color: T.ink }}>
+                                            <span>{s.name}</span>
+                                            <span className="f-mono text-[10px]" style={{ color: T.inkSoft }}>{s.msv}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {occ.length === 0 && cap === 0 && (
+                                    <div className="f-body text-[11px] italic" style={{ color: T.inkSoft }}>Chưa có sinh viên nào.</div>
+                                  )}
+                                </div>
+                              )}
+
+                              {perm.canManage && (
+                                <div className="flex items-center flex-wrap gap-2 mt-3">
+                                  <button onClick={() => setEditingId(r.id)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                                  <button onClick={() => removeRoom(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                                  {r.status !== "Đang bảo trì" ? (
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.red }} onClick={() => toggleStatus(r, "Đang bảo trì")}>Đánh dấu bảo trì</button>
+                                  ) : (
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
+                                  )}
+                                  {occ.length > 0 && (
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => { setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng…</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-              </div>
-              </div>
-              ))}
-              </div>
+            </div>
             </div>
             );
           })}
@@ -3091,9 +3093,11 @@ function DocsTab({ user, perm }) {
   return (
     <div>
       <SectionHeader icon={FolderOpen} eyebrow="Kho lưu trữ" title="Tài liệu - Văn bản ký túc xá"
-        action={<Btn onClick={() => setShowForm((s) => !s)}><Plus size={16} /> Thêm tài liệu</Btn>} />
+        action={perm.canManage && (
+          <Btn onClick={() => setShowForm((s) => !s)}><Plus size={16} /> Thêm tài liệu</Btn>
+        )} />
 
-      {showForm && (
+      {perm.canManage && showForm && (
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-3 gap-3" style={{ background: "#fff" }}>
           <div className="md:col-span-3"><FormWarning message={warn} /></div>
           <Field label="Nhóm văn bản"><input className={inputCls} style={inputStyle} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="VD: Nội quy, Biểu mẫu…" /></Field>
@@ -3900,6 +3904,24 @@ const TABS = [
   { id: "docs", label: "Tài liệu - Văn bản", icon: FolderOpen },
 ];
 
+// Mỗi mục chỉ hiện với đúng những vai trò được liệt kê ở đây — Học viên (sinh_vien) chỉ thấy
+// những mục dành cho mình (Tổng quan, Danh sách phòng để xem, Quản lý bảo trì để gửi/theo dõi yêu cầu,
+// Thông báo, Tài liệu - Văn bản). Các mục quản lý (danh sách sinh viên có thông tin cá nhân, bố trí phòng,
+// quân số, tài sản, điện - nước, nội vụ phòng) không hiện ra với Học viên, không chỉ là bị khoá nút bấm.
+const TAB_ROLES = {
+  home: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  rooms: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  students: ["admin", "can_bo"],
+  assignment: ["admin", "can_bo"],
+  roster: ["admin", "can_bo"],
+  assets: ["admin", "can_bo", "ky_thuat"],
+  maintenance: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  utilities: ["admin", "can_bo", "ky_thuat"],
+  inspections: ["admin", "can_bo"],
+  notifications: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  docs: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [isAdminLogin, setIsAdminLogin] = useState(false);
@@ -3922,6 +3944,11 @@ export default function App() {
   const goToTab = (tabId) => { setTab(tabId); setNavOpen(false); };
 
   const renderTab = () => {
+    const isReportsOrAdminTab = tab === "reports" || tab === "password" || tab === "permissions";
+    const allowedForTab = isReportsOrAdminTab
+      ? (tab === "reports" ? perm.canManage : perm.isAdmin)
+      : (TAB_ROLES[tab] || []).includes(perm.role);
+    if (!allowedForTab) return <DashboardTab perm={perm} />;
     switch (tab) {
       case "home": return <DashboardTab perm={perm} />;
       case "rooms": return <RoomsTab perm={perm} />;
@@ -3942,13 +3969,20 @@ export default function App() {
   };
 
   const visibleTabs = [
-    ...TABS,
+    ...TABS.filter((t) => (TAB_ROLES[t.id] || []).includes(perm.role)),
     ...(perm.canManage ? [{ id: "reports", label: "Báo cáo - Thống kê", icon: ClipboardCheck }] : []),
     ...(perm.isAdmin ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
     ...(perm.isAdmin ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
   ];
   const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
   const RoleIcon = roleIcon[perm.role] || Users;
+
+  // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
+  // đổi quyền của mình), tự động đưa về Tổng quan thay vì hiện trang trống hoặc dữ liệu không nên thấy.
+  useEffect(() => {
+    if (!visibleTabs.some((t) => t.id === tab)) setTab("home");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perm.role]);
 
   return (
     <div className="min-h-screen paper-tex f-body" style={{ color: T.ink }}>
