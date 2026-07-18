@@ -1306,8 +1306,16 @@ function DashboardTab({ perm, onNavigate }) {
                   </div>
                 ))}
                 <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-                  <span style={{ color: T.inkSoft }}>Tổng chỗ ở</span>
+                  <span style={{ color: T.inkSoft }}>Tổng sức chứa (toàn bộ giường)</span>
                   <span className="f-mono font-semibold" style={{ color: T.green }}>{totalCapacity}</span>
+                </div>
+                <div className="flex items-center justify-between f-body text-sm">
+                  <span style={{ color: T.inkSoft }}>Đang có người ở (thực tế)</span>
+                  <span className="f-mono font-semibold" style={{ color: T.amberDark }}>{occupiedCount}</span>
+                </div>
+                <div className="flex items-center justify-between f-body text-sm">
+                  <span style={{ color: T.inkSoft }}>Giường còn trống</span>
+                  <span className="f-mono font-semibold" style={{ color: T.green }}>{Math.max(totalCapacity - occupiedCount, 0)}</span>
                 </div>
               </div>
             </div>
