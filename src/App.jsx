@@ -711,6 +711,13 @@ function formatDateTime(iso) {
     return d.toLocaleString("vi-VN");
   } catch { return iso; }
 }
+function formatMonth(m) {
+  if (!m) return "—";
+  const parts = String(m).split("-");
+  if (parts.length !== 2) return m;
+  const [y, mo] = parts;
+  return `Tháng ${mo}/${y}`;
+}
 
 /* ============ NHẬP DỮ LIỆU TỪ ẢNH/TỆP (dùng chung khung cho Sinh viên) ============ */
 function guessStudentField(header) {
@@ -2907,7 +2914,7 @@ function UtilitiesTab({ perm, user }) {
                   const t = monthTotal(m);
                   return (
                     <tr key={m} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                      <td className="px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{m}</td>
+                      <td className="px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{formatMonth(m)}</td>
                       <td className="px-3 py-2 f-mono">{t.count}</td>
                       <td className="px-3 py-2 f-mono">{t.elec}</td>
                       <td className="px-3 py-2 f-mono">{t.water}</td>
@@ -2923,7 +2930,7 @@ function UtilitiesTab({ perm, user }) {
       <div className="flex flex-wrap gap-3 mb-4">
         <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
           <option value="">— Tất cả các tháng —</option>
-          {months.map((m) => <option key={m} value={m}>{m}</option>)}
+          {months.map((m) => <option key={m} value={m}>{formatMonth(m)}</option>)}
         </select>
       </div>
 
@@ -2947,7 +2954,7 @@ function UtilitiesTab({ perm, user }) {
                 return (
                   <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
                     <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
-                    <td className="px-3 py-2 f-mono">{r.month}</td>
+                    <td className="px-3 py-2 f-mono">{formatMonth(r.month)}</td>
                     <td className="px-3 py-2 f-mono">{r.electricityIndex}</td>
                     <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
                     <td className="px-3 py-2 f-mono">{r.waterIndex}</td>
