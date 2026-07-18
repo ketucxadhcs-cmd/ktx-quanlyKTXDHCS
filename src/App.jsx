@@ -89,6 +89,11 @@ const FONT_STYLE = `
   background-size: 14px 14px;
 }
 .stamp-border { border: 1.5px solid ${T.gold}; }
+.table-lines thead tr { border-bottom: 2px solid ${T.gold}; }
+.table-lines tbody tr { border-bottom: 1px solid ${T.paperDark}; }
+.table-lines tbody tr:last-child { border-bottom: none; }
+.table-grid th, .table-grid td { border-right: 1px solid ${T.paperDark}; }
+.table-grid th:last-child, .table-grid td:last-child { border-right: none; }
 input[type="checkbox"], input[type="radio"] { accent-color: ${T.amberDark}; }
 html { scrollbar-width: thin; scrollbar-color: ${T.amberDark} ${T.paper}; }
 html::-webkit-scrollbar { width: 10px; height: 10px; }
