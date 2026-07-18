@@ -1651,7 +1651,7 @@ function RoomsTab({ perm }) {
                   cuộn ngang để xem hết các tầng. Trong mỗi tầng, phòng xếp dọc từ trên xuống theo số phòng
                   (101, 102, 103…), cuộn dọc riêng từng tầng nếu tầng có nhiều phòng. */}
               <div className="overflow-x-auto pb-1.5 scrollbar-thin">
-                <div className="flex items-stretch gap-0" style={{ width: "max-content" }}>
+                <div className="flex items-start gap-0" style={{ width: "max-content" }}>
                   {areaGroups.map(([area, areaList], areaIdx) => (
                     <div
                       key={area}
