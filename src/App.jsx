@@ -1596,10 +1596,13 @@ function RoomsTab({ perm }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const [renamingBuilding, setRenamingBuilding] = useState(null); // Tên toà nhà (cũ) đang được đổi tên inline
   const [renameValue, setRenameValue] = useState("");
+  const [viewStudentId, setViewStudentId] = useState(null); // Đang xem đầy đủ thông tin 1 học viên trong phòng
 
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
 
   const occupantsOf = (roomId) => students.filter((s) => s.roomId === roomId && s.status !== "Đã trả phòng");
+  const viewStudent = viewStudentId ? students.find((s) => s.id === viewStudentId) : null;
+  const viewStudentRoom = viewStudent ? rooms.find((r) => r.id === viewStudent.roomId) : null;
 
   const validate = (form) => !form.building.trim() || !form.roomNumber.trim() || !String(form.capacity).trim();
 
@@ -1897,6 +1900,29 @@ function RoomsTab({ perm }) {
                                   {occ.length === 0 && cap === 0 && (
                                     <div className="f-body text-[11px] italic" style={{ color: T.inkSoft }}>Chưa có sinh viên nào.</div>
                                   )}
+
+                                  {occ.length > 0 && (
+                                    <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                                      <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>
+                                        Danh sách sinh viên trong phòng ({occ.length})
+                                      </div>
+                                      <ul className="space-y-1">
+                                        {occ.map((s) => (
+                                          <li key={s.id}>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => { e.stopPropagation(); setViewStudentId(s.id); }}
+                                              className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-sm text-left btn-press"
+                                              style={{ background: "rgba(31,51,40,0.04)", border: `1px solid ${T.paperDark}` }}
+                                            >
+                                              <span className="f-body text-[11.5px] font-medium truncate" style={{ color: T.green }}>{s.name}</span>
+                                              <span className="f-mono text-[10px] shrink-0" style={{ color: T.inkSoft }}>{s.lop || s.msv || ""}{s.bed ? ` · G${s.bed}` : ""}</span>
+                                            </button>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
@@ -1949,6 +1975,40 @@ function RoomsTab({ perm }) {
             <div className="flex gap-2 mt-2">
               <Btn onClick={doMerge} disabled={!mergeTarget}>Xác nhận dồn phòng</Btn>
               <Btn variant="outline" onClick={() => setMergeFrom(null)}>Huỷ</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => setViewStudentId(null)}>
+          <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="f-display text-base font-semibold" style={{ color: T.green }}>{viewStudent.name}</div>
+              <button onClick={() => setViewStudentId(null)} title="Đóng"><X size={16} style={{ color: T.inkSoft }} /></button>
+            </div>
+            <div className="space-y-1.5 f-body text-sm">
+              {[
+                ["Mã số SV", viewStudent.msv],
+                ["Giới tính", viewStudent.gender],
+                ["Khoá", viewStudent.khoa],
+                ["Lớp", viewStudent.lop],
+                ["Đại đội", viewStudent.daiDoi],
+                ["Năm học", viewStudent.namHoc],
+                ["Ngày sinh", formatDob(viewStudent.dob)],
+                ["Số điện thoại", viewStudent.phone],
+                ["Phòng đang ở", viewStudentRoom ? `${roomLabel(viewStudentRoom)}${viewStudent.bed ? ` · Giường ${viewStudent.bed}` : ""}` : "—"],
+                ["Trạng thái", viewStudent.status],
+                ["Ghi chú", viewStudent.note],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-start justify-between gap-3 py-1" style={{ borderBottom: `1px dashed ${T.paperDark}` }}>
+                  <span className="f-mono text-[10.5px] uppercase tracking-widest shrink-0" style={{ color: T.inkSoft }}>{label}</span>
+                  <span className="text-right" style={{ color: T.ink }}>{value || "—"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Btn variant="outline" onClick={() => setViewStudentId(null)}>Đóng</Btn>
             </div>
           </div>
         </div>
