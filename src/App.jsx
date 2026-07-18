@@ -726,6 +726,24 @@ function roomLabel(r) {
   if (!r) return "—";
   return `${r.building || "?"} - Phòng ${r.roomNumber || "?"}`;
 }
+// Trạng thái phòng thực tế: "Đang bảo trì" luôn là cờ đánh dấu tay và được ưu tiên tuyệt đối; còn lại thì
+// suy ra thẳng từ sĩ số thực có sinh viên hay không (không lệ thuộc vào trường status lưu tay dễ bị quên cập
+// nhật khi bố trí/chuyển/trả phòng) — tránh tình trạng sĩ số đầy mà nhãn vẫn hiện "Trống".
+function effectiveRoomStatus(room, occCount) {
+  if ((room?.status || "Trống") === "Đang bảo trì") return "Đang bảo trì";
+  return occCount > 0 ? "Đang ở" : "Trống";
+}
+// Giường tầng — mặc định ghép cặp 1 vị trí = 2 giường (dưới lẻ, trên chẵn): giường 1&2 = vị trí 1, 3&4 = vị trí 2...
+// Sức chứa phòng vẫn tự do chỉnh (không giới hạn cứng 10 giường / 5 vị trí), đây chỉ là cách hiển thị mặc định.
+function bedPosition(bedNo) {
+  return { position: Math.ceil(bedNo / 2), role: bedNo % 2 === 1 ? "Dưới" : "Trên" };
+}
+// Chọn giường trống nhỏ nhất còn lại trong phòng cho 1 sinh viên mới được bố trí vào — để không phải gán tay.
+function pickFreeBed(capacity, usedBeds) {
+  const cap = Number(capacity) || 0;
+  for (let n = 1; n <= cap; n++) { if (!usedBeds.has(String(n))) return String(n); }
+  return "";
+}
 // So sánh "tự nhiên": số đứng trước chữ, "2" trước "10" (không phải so theo ký tự) — dùng để sắp xếp
 // Toà nhà / Tầng / Số phòng theo đúng thứ tự khoa học thay vì thứ tự nhập liệu ngẫu nhiên.
 function naturalCompare(a, b) {
@@ -1211,8 +1229,10 @@ function DashboardTab({ perm, onNavigate }) {
   const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
   const totalStudents = students.length;
   const occupiedCount = activeStudents.filter((s) => s.roomId).length;
+  const roomOccCount = {};
+  activeStudents.forEach((s) => { if (s.roomId) roomOccCount[s.roomId] = (roomOccCount[s.roomId] || 0) + 1; });
   const byStatus = ROOM_STATUS.reduce((acc, s) => {
-    acc[s] = rooms.filter((r) => (r.status || "Trống") === s).length;
+    acc[s] = rooms.filter((r) => effectiveRoomStatus(r, roomOccCount[r.id] || 0) === s).length;
     return acc;
   }, {});
   const unassigned = activeStudents.filter((s) => !s.roomId).length;
@@ -1247,8 +1267,8 @@ function DashboardTab({ perm, onNavigate }) {
       roomCount: bRooms.length,
       capacity: cap,
       occupied: occ,
-      free: bRooms.filter((r) => (r.status || "Trống") === "Trống").length,
-      maintenance: bRooms.filter((r) => (r.status || "Trống") === "Đang bảo trì").length,
+      free: bRooms.filter((r) => effectiveRoomStatus(r, roomOccCount[r.id] || 0) === "Trống").length,
+      maintenance: bRooms.filter((r) => effectiveRoomStatus(r, roomOccCount[r.id] || 0) === "Đang bảo trì").length,
     };
   });
 
@@ -1663,7 +1683,7 @@ function RoomsTab({ perm }) {
   const filteredRooms = rooms.filter((r) =>
     (!filterBuilding || r.building === filterBuilding) &&
     (!filterArea || r.area === filterArea) &&
-    (!filterStatus || (r.status || "Trống") === filterStatus)
+    (!filterStatus || effectiveRoomStatus(r, occupantsOf(r.id).length) === filterStatus)
   );
   const UNKNOWN_BUILDING = "Chưa rõ toà nhà";
   const UNKNOWN_AREA = "Chưa rõ tầng/khu vực";
@@ -1832,8 +1852,8 @@ function RoomsTab({ perm }) {
                                   <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
                                   <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>{r.area || "—"} · {r.gender || "Nam"}</div>
                                 </div>
-                                <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status || "Trống"], color: "#fff" }}>
-                                  {r.status || "Trống"}
+                                <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[effectiveRoomStatus(r, occ.length)], color: "#fff" }}>
+                                  {effectiveRoomStatus(r, occ.length)}
                                 </span>
                               </div>
                               <div className="f-body text-xs mt-2" style={{ color: T.ink }}>
@@ -1858,25 +1878,38 @@ function RoomsTab({ perm }) {
 
                               {expandedId === r.id && (
                                 <div className="mt-2 pt-2" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-                                  <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>Sơ đồ giường</div>
+                                  <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.amberDark }}>Sơ đồ giường (giường tầng — mỗi vị trí 2 giường trên/dưới)</div>
                                   {cap > 0 ? (
                                     <div className="grid grid-cols-2 gap-1.5 mb-2">
-                                      {Array.from({ length: cap }, (_, i) => i + 1).map((bedNo) => {
-                                        const occByBed = occ.find((s) => String(s.bed) === String(bedNo));
+                                      {Array.from({ length: Math.ceil(cap / 2) }, (_, i) => i + 1).map((pos) => {
+                                        const lowerNo = pos * 2 - 1;
+                                        const upperNo = pos * 2;
+                                        const beds = [lowerNo, ...(upperNo <= cap ? [upperNo] : [])];
                                         return (
-                                          <div
-                                            key={bedNo}
-                                            className="f-body text-[10.5px] px-2 py-1.5 rounded-sm flex items-center gap-1.5"
-                                            style={{
-                                              background: occByBed ? "#DCEAFC" : "rgba(31,51,40,0.05)",
-                                              border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
-                                            }}
-                                          >
-                                            <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
-                                            <span style={{ color: T.inkSoft }}>G{bedNo}:</span>
-                                            <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
-                                              {occByBed ? occByBed.name : "Trống"}
-                                            </span>
+                                          <div key={pos} className="p-1.5 rounded-sm" style={{ border: `1px solid ${T.paperDark}`, background: "rgba(31,51,40,0.03)" }}>
+                                            <div className="f-mono text-[9px] uppercase tracking-wider mb-1" style={{ color: T.inkSoft }}>Vị trí {pos}</div>
+                                            <div className="space-y-1">
+                                              {beds.map((bedNo) => {
+                                                const { role } = bedPosition(bedNo);
+                                                const occByBed = occ.find((s) => String(s.bed) === String(bedNo));
+                                                return (
+                                                  <div
+                                                    key={bedNo}
+                                                    className="f-body text-[10.5px] px-1.5 py-1 rounded-sm flex items-center gap-1.5"
+                                                    style={{
+                                                      background: occByBed ? T.selectBg : "#fff",
+                                                      border: `1px solid ${occByBed ? T.selectBorder : T.paperDark}`,
+                                                    }}
+                                                  >
+                                                    <BedDouble size={11} style={{ color: occByBed ? T.selectBorder : T.inkSoft, flexShrink: 0 }} />
+                                                    <span style={{ color: T.inkSoft }}>{role} (G{bedNo}):</span>
+                                                    <span className="truncate" style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic" }}>
+                                                      {occByBed ? occByBed.name : "Trống"}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
                                           </div>
                                         );
                                       })}
@@ -2319,6 +2352,9 @@ function AssignmentTab({ perm }) {
         if (occ.length === 0) reasons.push("Phòng đang trống hoàn toàn");
         else if (otherLop > 0 && sameLop === 0) reasons.push(`Có ${otherLop} bạn khác lớp đang ở`);
         reasons.push(`Còn ${remainingMap[r.id]} chỗ trống`);
+        const usedBeds = new Set(occ.map((o) => String(o.bed)).filter(Boolean));
+        const suggestedBed = pickFreeBed(r.capacity, usedBeds);
+        if (suggestedBed) reasons.push(`Sẽ xếp giường: ${suggestedBed}`);
         const score = sameLop * 100 + sameKhoa * 10 - otherLop * 3 + (occ.length === 0 ? 1 : 0);
         return { room: r, score, reasons, sameLop, sameKhoa };
       })
@@ -2334,8 +2370,12 @@ function AssignmentTab({ perm }) {
   const suggestStudent = unassigned.find((s) => String(s.id) === String(suggestStudentId)) || null;
   const suggestions = suggestStudent ? suggestRoomsForStudent(suggestStudent, computeRemaining()).slice(0, 5) : [];
   const assignOne = async (studentId, roomId) => {
-    await setStudents(students.map((s) => (s.id === studentId ? { ...s, roomId, status: "Đang ở" } : s)));
-    setMsg("Đã xếp phòng cho học viên theo gợi ý.");
+    const student = students.find((s) => s.id === studentId);
+    const room = rooms.find((r) => r.id === roomId);
+    const usedBeds = new Set(roomOccupants(roomId).map((s) => String(s.bed)).filter(Boolean));
+    const bed = pickFreeBed(room?.capacity, usedBeds);
+    await setStudents(students.map((s) => (s.id === studentId ? { ...s, roomId, bed, status: "Đang ở" } : s)));
+    setMsg(`Đã xếp ${student?.name || "học viên"} vào ${room ? roomLabel(room) : "phòng"}${bed ? ` — Giường ${bed}` : ""} theo gợi ý.`);
     setSuggestStudentId("");
   };
 
@@ -2348,12 +2388,14 @@ function AssignmentTab({ perm }) {
     const roomLopCount = {};
     const roomKhoaCount = {};
     const roomOccCount = {};
-    rooms.forEach((r) => { roomOccCount[r.id] = 0; });
+    const roomUsedBeds = {}; // roomId -> Set các số giường đã có người, để tự chọn giường trống tiếp theo
+    rooms.forEach((r) => { roomOccCount[r.id] = 0; roomUsedBeds[r.id] = new Set(); });
     students.forEach((s) => {
       if (!s.roomId || s.status === "Đã trả phòng") return;
       roomOccCount[s.roomId] = (roomOccCount[s.roomId] || 0) + 1;
       if (s.lop) { const k = `${s.roomId}|${s.lop}`; roomLopCount[k] = (roomLopCount[k] || 0) + 1; }
       if (s.khoa) { const k = `${s.roomId}|${s.khoa}`; roomKhoaCount[k] = (roomKhoaCount[k] || 0) + 1; }
+      if (s.bed && roomUsedBeds[s.roomId]) roomUsedBeds[s.roomId].add(String(s.bed));
     });
 
     // Xếp thứ tự xử lý: theo giới tính (bắt buộc đúng), rồi theo khoá, rồi theo lớp — để các bạn cùng
@@ -2381,9 +2423,11 @@ function AssignmentTab({ perm }) {
         const score = sameLop * 100 + sameKhoa * 10 - otherLop * 3 + (occCount === 0 ? 1 : 0);
         if (score > bestScore) { bestScore = score; best = r; }
       });
-      assignments.push({ studentId: s.id, studentName: s.name, roomId: best.id, roomLabel: roomLabel(best) });
+      const bed = pickFreeBed(best.capacity, roomUsedBeds[best.id] || new Set());
+      assignments.push({ studentId: s.id, studentName: s.name, roomId: best.id, roomLabel: roomLabel(best), bed });
       remaining[best.id] -= 1;
       roomOccCount[best.id] = (roomOccCount[best.id] || 0) + 1;
+      if (bed) (roomUsedBeds[best.id] || (roomUsedBeds[best.id] = new Set())).add(bed);
       if (s.lop) { const k = `${best.id}|${s.lop}`; roomLopCount[k] = (roomLopCount[k] || 0) + 1; }
       if (s.khoa) { const k = `${best.id}|${s.khoa}`; roomKhoaCount[k] = (roomKhoaCount[k] || 0) + 1; }
     });
@@ -2394,9 +2438,9 @@ function AssignmentTab({ perm }) {
 
   const confirmAssignment = async () => {
     if (!preview || preview.assignments.length === 0) return;
-    const map = new Map(preview.assignments.map((a) => [a.studentId, a.roomId]));
-    await setStudents(students.map((s) => (map.has(s.id) ? { ...s, roomId: map.get(s.id), status: "Đang ở" } : s)));
-    setMsg(`Đã bố trí ${preview.assignments.length} sinh viên vào phòng.`);
+    const map = new Map(preview.assignments.map((a) => [a.studentId, { roomId: a.roomId, bed: a.bed || "" }]));
+    await setStudents(students.map((s) => (map.has(s.id) ? { ...s, roomId: map.get(s.id).roomId, bed: map.get(s.id).bed, status: "Đang ở" } : s)));
+    setMsg(`Đã bố trí ${preview.assignments.length} sinh viên vào phòng, tự động xếp luôn số giường.`);
     setPreview(null);
   };
 
@@ -2495,6 +2539,7 @@ function AssignmentTab({ perm }) {
                   <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0 }}>
                     <th className="text-left px-2.5 py-1.5">Sinh viên</th>
                     <th className="text-left px-2.5 py-1.5">Phòng dự kiến</th>
+                    <th className="text-left px-2.5 py-1.5">Giường</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2502,6 +2547,7 @@ function AssignmentTab({ perm }) {
                     <tr key={a.studentId} style={{ borderBottom: `1px solid ${T.paperDark}` }}>
                       <td className="px-2.5 py-1.5 font-medium">{a.studentName}</td>
                       <td className="px-2.5 py-1.5 f-mono">{a.roomLabel}</td>
+                      <td className="px-2.5 py-1.5 f-mono">{a.bed || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -4069,7 +4115,7 @@ function ReportsTab({ perm }) {
         const room = rooms.find((r) => r.id === s.roomId);
         return { "MSV": s.msv, "Họ tên": s.name, "Giới tính": s.gender, "Khoá": s.khoa, "Lớp": s.lop, "Phòng": room ? roomLabel(room) : "Chưa xếp phòng", "Trạng thái": s.status || "Đang ở" };
       });
-      const roomRows = rooms.map((r) => ({ "Toà nhà": r.building, "Tầng/Khu vực": r.area, "Số phòng": r.roomNumber, "Sức chứa": r.capacity, "Trạng thái": r.status || "Trống", "SL đang ở": activeStudents.filter((s) => s.roomId === r.id).length }));
+      const roomRows = rooms.map((r) => ({ "Toà nhà": r.building, "Tầng/Khu vực": r.area, "Số phòng": r.roomNumber, "Sức chứa": r.capacity, "Trạng thái": effectiveRoomStatus(r, activeStudents.filter((s) => s.roomId === r.id).length), "SL đang ở": activeStudents.filter((s) => s.roomId === r.id).length }));
       const assetRows = assets.map((a) => { const room = rooms.find((r) => r.id === a.roomId); return { "Phòng": room ? roomLabel(room) : "—", "Tên tài sản": a.name, "Phân loại": a.category, "Số lượng": a.quantity, "Tình trạng": a.status, "Ghi chú": a.note }; });
       const maintRows = maint.map((m) => { const room = rooms.find((r) => r.id === m.roomId); return { "Phòng": room ? roomLabel(room) : "—", "Nội dung": m.title, "Người gửi": m.reporterName, "Trạng thái": m.status, "Ngày gửi": formatDateTime(m.createdAt) }; });
       await exportSheetsToExcel(`BaoCaoKyTucXa_${new Date().toISOString().slice(0, 10)}.xlsx`, [
