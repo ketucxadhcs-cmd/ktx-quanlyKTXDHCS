@@ -3561,9 +3561,10 @@ function AssetsTab({ perm, user }) {
 
       {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có tài sản/thiết bị nào phù hợp." /> : (
         <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
-          <table className="w-full text-sm f-body table-lines">
+          <table className="w-full text-sm f-body table-lines table-grid">
             <thead>
               <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-center px-3 py-2 w-12">STT</th>
                 <th className="text-left px-3 py-2">Phòng</th>
                 <th className="text-left px-3 py-2">Ảnh</th>
                 <th className="text-left px-3 py-2">Tên thiết bị</th>
@@ -3580,7 +3581,7 @@ function AssetsTab({ perm, user }) {
                 const room = rooms.find((r) => r.id === a.roomId);
                 if (editingId === a.id) {
                   return (
-                    <tr key={a.id}><td colSpan={9} className="p-2">
+                    <tr key={a.id}><td colSpan={10} className="p-2">
                       <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
                         <Field label="Phòng">
                           <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
@@ -3618,6 +3619,7 @@ function AssetsTab({ perm, user }) {
                 }
                 return (
                   <tr key={a.id} onClick={() => setSelectedId((id) => (id === a.id ? null : a.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === a.id)}>
+                    <td className="px-3 py-2 f-mono text-center" style={{ color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
                     <td className="px-3 py-2">
                       {a.imageUrl ? (
