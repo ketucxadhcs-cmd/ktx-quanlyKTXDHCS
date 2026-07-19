@@ -858,7 +858,8 @@ function ForgotAdminPanel({ config, setConfig, onBack, onDone }) {
       await sendRecoveryOtpEmail(otp);
       setOtpStatus(`Đã gửi mã OTP đến ${ADMIN_RECOVERY_EMAIL} — có hiệu lực ${OTP_TTL_MS / 60000} phút. Kiểm tra cả mục Spam nếu chưa thấy.`);
     } catch (e) {
-      setOtpStatus(`Gửi email thất bại — ${e?.message || e}. Vui lòng liên hệ trực tiếp bộ phận Kỹ thuật / người phụ trách hệ thống để được hỗ trợ.`);
+      const reason = e?.text || e?.message || (typeof e === "string" ? e : JSON.stringify(e));
+      setOtpStatus(`Gửi email thất bại — ${reason}. Vui lòng liên hệ trực tiếp bộ phận Kỹ thuật / người phụ trách hệ thống để được hỗ trợ.`);
     }
     setOtpSending(false);
   };
