@@ -1229,7 +1229,14 @@ function DashboardTab({ perm, onNavigate }) {
 
   // Chỉ cho bấm/xem mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
   const isAllowed = (tabId) => (TAB_ROLES[tabId] || []).includes(perm.role);
-  const goIfAllowed = (tabId) => (onNavigate && isAllowed(tabId) ? () => onNavigate(tabId) : undefined);
+  // Học viên chỉ được BẤM VÀO từ Tổng quan để chuyển sang "Quản lý bảo trì" (gửi/theo dõi yêu cầu sửa chữa).
+  // Các thẻ khác (phòng, tài sản...) vẫn hiện số liệu tổng quan nhưng không cho học viên bấm vào để chuyển trang,
+  // dù về mặt TAB_ROLES một số mục (VD: rooms) học viên vẫn có thể xem được ở nơi khác.
+  const goIfAllowed = (tabId) => {
+    if (!onNavigate || !isAllowed(tabId)) return undefined;
+    if (perm.role === "sinh_vien" && tabId !== "maintenance") return undefined;
+    return () => onNavigate(tabId);
+  };
 
   const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
   const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
@@ -3507,7 +3514,7 @@ function MaintenanceTab({ perm, user }) {
     await setRequests(requests.map((r) => (r.id === id ? { ...r, assignedTo: assignDraft[id] ?? r.assignedTo } : r)));
   };
 
-  const canDelete = (r) => perm.canMaintain || perm.isOwner(r.reporterName);
+  const canDelete = (r) => perm.canMaintain || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
   const filtered = filterStatus ? requests.filter((r) => r.status === filterStatus) : requests;
   const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
 
