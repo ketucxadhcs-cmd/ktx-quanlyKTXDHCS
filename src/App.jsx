@@ -3768,11 +3768,18 @@ function UtilitiesTab({ perm, user }) {
       return true;
     })
     .sort((a, b) => {
+      const ra = rooms.find((x) => x.id === a.roomId), rb = rooms.find((x) => x.id === b.roomId);
       if (filterMonth) {
-        const ra = rooms.find((x) => x.id === a.roomId), rb = rooms.find((x) => x.id === b.roomId);
         return naturalCompare(ra?.building || "", rb?.building || "") || naturalCompare(ra?.area || "", rb?.area || "") || naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || ""));
       }
-      return String(b.month).localeCompare(String(a.month));
+      // Không lọc theo 1 tháng cụ thể: nhóm theo tháng trước (mới nhất lên đầu), rồi trong cùng 1 tháng thì
+      // sắp theo Toà nhà -> Tầng -> Số phòng — tránh tình trạng các phòng của các toà xen kẽ lộn xộn.
+      return (
+        String(b.month).localeCompare(String(a.month)) ||
+        naturalCompare(ra?.building || "", rb?.building || "") ||
+        naturalCompare(ra?.area || "", rb?.area || "") ||
+        naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || ""))
+      );
     });
 
   // Phòng nào CHƯA có chỉ số của tháng đang lọc — quan trọng khi số phòng lên tới hàng trăm/nghìn, để
@@ -4064,7 +4071,7 @@ function UtilitiesTab({ perm, user }) {
                 }
                 return (
                   <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
+                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "Phòng đã xoá"}</td>
                     <td className="px-3 py-2 f-mono">{formatMonth(r.month)}</td>
                     <td className="px-3 py-2 f-mono">{r.electricityIndex}</td>
                     <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
