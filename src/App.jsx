@@ -3771,8 +3771,7 @@ function MaintenanceTab({ perm, user }) {
                 className="f-display text-[11px] font-bold uppercase tracking-wider mb-2 px-3 py-2 rounded-sm flex items-center justify-between"
                 style={{ color: "#fff", background: statusColor[status] || T.green, boxShadow: `inset 0 0 0 1px ${T.gold}` }}
               >
-                <span>{status}</span>
-                <span className="f-mono text-[10.5px]">{list.length}</span>
+                <span>{status} ({list.length})</span>
               </div>
 
               {list.length === 0 ? (
