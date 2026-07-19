@@ -1365,35 +1365,86 @@ function DashboardTab({ perm, onNavigate }) {
     <div>
       <SectionHeader icon={LayoutGrid} eyebrow="Tổng quan" title="Bảng điều khiển ký túc xá" />
       {loading ? <LoadingRow /> : isTechOnly ? (
-        <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
-          <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
+        <div className="space-y-6">
+          <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
+            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
 
-          <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
-          <div className="space-y-1 mb-3">
-            {MAINT_STATUS.map((s) => (
-              <div key={s} className="flex items-center justify-between f-body text-sm">
-                <span style={{ color: T.ink }}>{s}</span>
-                <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : s === "Đang xử lý" ? T.amberDark : T.green }}>{maintByStatus[s] || 0}</span>
+            <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
+            <div className="space-y-1 mb-3">
+              {MAINT_STATUS.map((s) => (
+                <div key={s} className="flex items-center justify-between f-body text-sm">
+                  <span style={{ color: T.ink }}>{s}</span>
+                  <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : s === "Đang xử lý" ? T.amberDark : T.green }}>{maintByStatus[s] || 0}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
+                <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
               </div>
-            ))}
-            <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-              <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
-              <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
+            </div>
+
+            <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
+            <div className="space-y-1">
+              {ASSET_STATUS.map((s) => (
+                <div key={s} className="flex items-center justify-between f-body text-sm">
+                  <span style={{ color: T.ink }}>{s}</span>
+                  <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : s === "Đang sửa" ? T.amberDark : T.green }}>{assetByStatus[s] || 0}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
+                <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
+              </div>
             </div>
           </div>
 
-          <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
-          <div className="space-y-1">
-            {ASSET_STATUS.map((s) => (
-              <div key={s} className="flex items-center justify-between f-body text-sm">
-                <span style={{ color: T.ink }}>{s}</span>
-                <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : s === "Đang sửa" ? T.amberDark : T.green }}>{assetByStatus[s] || 0}</span>
-              </div>
-            ))}
-            <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-              <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
-              <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
+          <div className="stamp-border p-4" style={{ background: "#fff" }}>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="f-display text-sm uppercase tracking-wider" style={{ color: T.amberDark }}>Danh mục yêu cầu sửa chữa</div>
+              {isAllowed("maintenance") && onNavigate && (
+                <button onClick={() => onNavigate("maintenance")} className="f-mono text-[11px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.green }}>
+                  Xem tất cả ({maint.length})
+                </button>
+              )}
             </div>
+            {maint.length === 0 ? <EmptyState text="Chưa có yêu cầu sửa chữa nào." /> : (
+              <div className="overflow-x-auto stamp-border" style={{ background: "#fff" }}>
+                <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+                  <thead>
+                    <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                      <th className="text-center px-3 py-2">Phòng</th>
+                      <th className="text-left px-3 py-2">Nội dung yêu cầu</th>
+                      <th className="text-center px-3 py-2">Trạng thái</th>
+                      <th className="text-center px-3 py-2">Người gửi</th>
+                      <th className="text-center px-3 py-2">Ngày gửi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...maint]
+                      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+                      .slice(0, 8)
+                      .map((m, i) => {
+                        const room = rooms.find((r) => r.id === m.roomId);
+                        const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
+                        return (
+                          <tr
+                            key={m.id}
+                            onClick={goIfAllowed("maintenance")}
+                            className={goIfAllowed("maintenance") ? "cursor-pointer" : ""}
+                            style={{ background: i % 2 ? T.paper : "#fff" }}
+                          >
+                            <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? roomLabel(room) : "Phòng đã xoá"}</td>
+                            <td className="text-left px-3 py-2">{m.title}</td>
+                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: statusColor[m.status] || T.ink }}>{m.status}</td>
+                            <td className="text-center px-3 py-2 f-mono">{m.reporterName || "—"}</td>
+                            <td className="text-center px-3 py-2 f-mono text-[11px]" style={{ color: T.inkSoft }}>{m.createdAt ? formatDateTime(m.createdAt) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       ) : (
