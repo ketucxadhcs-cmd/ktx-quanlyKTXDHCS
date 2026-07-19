@@ -5112,12 +5112,14 @@ const TABS = [
 ];
 
 // Mỗi mục chỉ hiện với đúng những vai trò được liệt kê ở đây — Học viên (sinh_vien) chỉ thấy
-// những mục dành cho mình (Tổng quan, Danh sách phòng để xem, Quản lý bảo trì để gửi/theo dõi yêu cầu,
-// Thông báo, Tài liệu - Văn bản). Các mục quản lý (danh sách sinh viên có thông tin cá nhân, bố trí phòng,
+// những mục dành cho mình (Tổng quan, Quản lý bảo trì để gửi/theo dõi yêu cầu, Thông báo, Tài liệu - Văn bản).
+// Các mục quản lý (danh sách phòng, danh sách sinh viên có thông tin cá nhân, bố trí phòng,
 // quân số, tài sản, điện - nước, nội vụ phòng) không hiện ra với Học viên, không chỉ là bị khoá nút bấm.
+// Ở Tổng quan, học viên vẫn thấy số liệu tổng hợp về phòng (xem goIfAllowed trong DashboardTab) nhưng
+// không bấm vào được vì không còn trong danh sách vai trò của tab "rooms".
 const TAB_ROLES = {
   home: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  rooms: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  rooms: ["admin", "can_bo", "ky_thuat"],
   students: ["admin", "can_bo"],
   assignment: ["admin", "can_bo"],
   roster: ["admin", "can_bo"],
