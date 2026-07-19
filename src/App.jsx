@@ -1357,7 +1357,7 @@ function DashboardTab({ perm, onNavigate }) {
         .sort((a, b) => naturalCompare(a.room.area || "", b.room.area || "") || naturalCompare(String(a.room.roomNumber || ""), String(b.room.roomNumber || "")))
     : [];
 
-  // Vai trò Kỹ thuật chỉ quản lý Tài sản & thiết bị + Bảo trì, nên ở Tổng quan chỉ cho xem đúng khối
+  // Vai trò Kỹ thuật chỉ quản lý Bảo trì, nên ở Tổng quan chỉ cho xem đúng khối
   // "Bảo trì & tài sản" — không hiện số liệu phòng/sinh viên vốn ngoài phạm vi quyền hạn của họ.
   const isTechOnly = perm.role === "ky_thuat";
 
@@ -1371,10 +1371,10 @@ function DashboardTab({ perm, onNavigate }) {
           </div>
 
           <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
-            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
+            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì</div>
 
             <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
-            <div className="space-y-1 mb-3">
+            <div className="space-y-1">
               {MAINT_STATUS.map((s) => (
                 <div key={s} className="flex items-center justify-between f-body text-sm">
                   <span style={{ color: T.ink }}>{s}</span>
@@ -1384,20 +1384,6 @@ function DashboardTab({ perm, onNavigate }) {
               <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
                 <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
                 <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
-              </div>
-            </div>
-
-            <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
-            <div className="space-y-1">
-              {ASSET_STATUS.map((s) => (
-                <div key={s} className="flex items-center justify-between f-body text-sm">
-                  <span style={{ color: T.ink }}>{s}</span>
-                  <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : s === "Đang sửa" ? T.amberDark : T.green }}>{assetByStatus[s] || 0}</span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-                <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
-                <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
               </div>
             </div>
           </div>
@@ -5358,7 +5344,7 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
     cancelEdit();
   };
 
-  const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Tài sản & Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
+  const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
 
   return (
     <div>
@@ -5369,7 +5355,7 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
       <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
         <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
           Mặc định, chỉ <b>Quản trị viên</b> và <b>Cán bộ quản lý ký túc xá</b> mới được thêm/xoá/sửa Phòng, Học viên, Bố trí và Phân quyền.
-          Vai trò <b>Kỹ thuật</b> chỉ được quản lý mục Tài sản - thiết bị và Bảo trì (cập nhật trạng thái, ghi chú xử lý).
+          Vai trò <b>Kỹ thuật</b> chỉ được quản lý mục Bảo trì (cập nhật trạng thái, ghi chú xử lý).
           Học viên chỉ gửi được yêu cầu bảo trì và tự xoá yêu cầu do chính mình gửi. Nhập đúng họ tên người đó dùng để đăng nhập, rồi chọn vai trò.
         </p>
         <FormWarning message={warn} />
@@ -5470,7 +5456,7 @@ const TAB_ROLES = {
   students: ["admin", "can_bo"],
   assignment: ["admin", "can_bo"],
   roster: ["admin", "can_bo"],
-  assets: ["admin", "can_bo", "ky_thuat"],
+  assets: ["admin", "can_bo"],
   maintenance: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
   utilities: ["admin", "can_bo"],
   inspections: ["admin", "can_bo"],
