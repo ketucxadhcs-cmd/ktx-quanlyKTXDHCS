@@ -1877,6 +1877,7 @@ function RoomsTab({ perm }) {
   const [renameValue, setRenameValue] = useState("");
   const [viewStudentId, setViewStudentId] = useState(null); // Đang xem đầy đủ thông tin 1 học viên trong phòng
   const [swapStudent, setSwapStudent] = useState(null); // Đang đổi giường cho học viên này với 1 bạn cùng phòng
+  const [bedPreview, setBedPreview] = useState(null); // Xem trước kết quả "Gán giường còn thiếu" trước khi lưu thật
   // action = { bed, swapWithId }: chuyển học viên sang "bed"; nếu "bed" đó đang có người (swapWithId) thì
   // người đó nhận lại giường cũ của học viên — còn nếu giường trống thì chỉ chuyển 1 chiều.
   const confirmSwap = async (student, action) => {
@@ -1901,28 +1902,37 @@ function RoomsTab({ perm }) {
     if (Object.keys(updates).length === 0) return;
     await setStudents(students.map((s) => (updates[s.id] ? { ...s, bed: updates[s.id] } : s)));
   };
-  // Quét toàn bộ ký túc xá, gán giường còn thiếu cho mọi phòng cùng lúc.
-  const autoAssignAllBeds = async () => {
+  // Quét toàn bộ ký túc xá, tìm những học viên đang ở trong phòng nhưng chưa có số giường — chỉ TÍNH TOÁN
+  // và hiển thị bảng xem trước, chưa lưu gì cả. Người dùng xem kỹ rồi mới bấm "Xác nhận" ở bước sau.
+  const buildBedPreview = () => {
     const usedBedsByRoom = {};
     rooms.forEach((r) => {
       usedBedsByRoom[r.id] = new Set(
         students.filter((s) => s.roomId === r.id && s.status !== "Đã trả phòng").map((s) => String(s.bed)).filter(Boolean)
       );
     });
-    const updates = {};
-    students.forEach((s) => {
-      if (!s.roomId || s.status === "Đã trả phòng" || s.bed) return;
-      const room = rooms.find((r) => r.id === s.roomId);
-      if (!room) return;
-      const bed = pickFreeBed(room.capacity, usedBedsByRoom[room.id] || new Set());
-      if (bed) { updates[s.id] = bed; (usedBedsByRoom[room.id] || (usedBedsByRoom[room.id] = new Set())).add(bed); }
-    });
-    if (Object.keys(updates).length === 0) {
-      reportGlobalNotice("Không có giường nào cần gán — mọi sinh viên đã có số giường.");
-      return;
-    }
-    await setStudents(students.map((s) => (updates[s.id] ? { ...s, bed: updates[s.id] } : s)));
-    reportGlobalNotice(`Đã gán giường cho ${Object.keys(updates).length} sinh viên.`);
+    const assignments = [];
+    const notPlaced = [];
+    students
+      .filter((s) => s.roomId && s.status !== "Đã trả phòng" && !s.bed)
+      .forEach((s) => {
+        const room = rooms.find((r) => r.id === s.roomId);
+        if (!room) { notPlaced.push({ student: s, reason: "Phòng không còn tồn tại" }); return; }
+        const used = usedBedsByRoom[room.id] || (usedBedsByRoom[room.id] = new Set());
+        const bed = pickFreeBed(room.capacity, used);
+        if (!bed) { notPlaced.push({ student: s, reason: `${roomLabel(room)} đã hết giường trống (sức chứa ${room.capacity || 0})` }); return; }
+        used.add(bed);
+        assignments.push({ studentId: s.id, studentName: s.name, roomId: room.id, roomLabel: roomLabel(room), bed });
+      });
+    setBedPreview({ assignments, notPlaced });
+  };
+
+  const confirmBedPreview = async () => {
+    if (!bedPreview || bedPreview.assignments.length === 0) return;
+    const map = new Map(bedPreview.assignments.map((a) => [a.studentId, a.bed]));
+    await setStudents(students.map((s) => (map.has(s.id) ? { ...s, bed: map.get(s.id) } : s)));
+    reportGlobalNotice(`Đã gán giường cho ${bedPreview.assignments.length} sinh viên.`);
+    setBedPreview(null);
   };
 
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
@@ -2065,17 +2075,66 @@ function RoomsTab({ perm }) {
   };
 
   const statusColor = { "Trống": T.green, "Đang ở": T.amberDark, "Đang bảo trì": T.red };
+  const missingBedCount = students.filter((s) => s.roomId && s.status !== "Đã trả phòng" && !s.bed).length;
 
   return (
     <div>
       <SectionHeader compact icon={Building2} eyebrow={`Tổng số phòng: ${rooms.length}`} title="Danh sách phòng"
         action={perm.canManage && (
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Btn size="sm" variant="outline" onClick={autoAssignAllBeds}><Repeat size={14} /> Gán giường còn thiếu</Btn>
+            <Btn size="sm" variant="outline" onClick={buildBedPreview} disabled={missingBedCount === 0}>
+              <Repeat size={14} /> Gán giường còn thiếu{missingBedCount > 0 ? ` (${missingBedCount})` : ""}
+            </Btn>
             <Btn size="sm" variant="outline" onClick={() => setShowImport((s) => !s)}><Upload size={14} /> Nhập từ Excel/CSV</Btn>
             <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Thêm phòng</Btn>
           </div>
         )} />
+
+      {bedPreview && (
+        <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+          <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
+            Xem trước — gán giường cho {bedPreview.assignments.length} sinh viên
+          </div>
+          {bedPreview.assignments.length === 0 ? (
+            <EmptyState text="Không có giường trống phù hợp để gán tự động." />
+          ) : (
+            <div className="overflow-x-auto stamp-border mb-3" style={{ background: "#fff", maxHeight: 320, overflowY: "auto" }}>
+              <table className="w-full text-xs f-body table-lines">
+                <thead>
+                  <tr className="f-mono text-[10px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0 }}>
+                    <th className="text-left px-2.5 py-1.5">Sinh viên</th>
+                    <th className="text-left px-2.5 py-1.5">Phòng</th>
+                    <th className="text-left px-2.5 py-1.5">Giường sẽ gán</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bedPreview.assignments.map((a) => (
+                    <tr key={a.studentId} style={{ borderBottom: `1px solid ${T.paperDark}` }}>
+                      <td className="px-2.5 py-1.5 font-medium">{a.studentName}</td>
+                      <td className="px-2.5 py-1.5 f-mono">{a.roomLabel}</td>
+                      <td className="px-2.5 py-1.5 f-mono">{a.bed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {bedPreview.notPlaced.length > 0 && (
+            <div className="f-body text-xs mb-3" style={{ color: T.red }}>
+              ⚠ Không gán được cho {bedPreview.notPlaced.length} sinh viên:
+              <ul className="mt-1 space-y-0.5">
+                {bedPreview.notPlaced.map(({ student, reason }) => (
+                  <li key={student.id}>· {student.name} — {reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Btn onClick={confirmBedPreview} disabled={bedPreview.assignments.length === 0}><CheckCircle2 size={14} /> Xác nhận, lưu giường đã gán</Btn>
+            <Btn variant="outline" onClick={() => setBedPreview(null)}>Huỷ</Btn>
+          </div>
+        </div>
+      )}
 
       {perm.canManage && showImport && (
         <RoomImportPanel
