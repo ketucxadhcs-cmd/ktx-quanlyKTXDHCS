@@ -1243,6 +1243,9 @@ function DashboardTab({ perm, onNavigate }) {
   const unassigned = activeStudents.filter((s) => !s.roomId).length;
   const pendingMaint = maint.filter((m) => m.status === "Chờ xử lý" || m.status === "Đang xử lý").length;
   const brokenAssets = assets.filter((a) => a.status === "Hỏng").length;
+  // Thống kê chi tiết theo từng trạng thái — để khối "Bảo trì & Tài sản" ở Tổng quan không chỉ gộp 1 con số.
+  const maintByStatus = MAINT_STATUS.reduce((acc, s) => { acc[s] = maint.filter((m) => m.status === s).length; return acc; }, {});
+  const assetByStatus = ASSET_STATUS.reduce((acc, s) => { acc[s] = assets.filter((a) => a.status === s).length; return acc; }, {});
 
   const StatCard = ({ icon: Icon, label, value, accent, onClick }) => (
     <div
@@ -1321,19 +1324,37 @@ function DashboardTab({ perm, onNavigate }) {
             </div>
             <div className="stamp-border p-4" style={{ background: "#fff" }}>
               <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
-              <div className="flex items-center justify-between f-body text-sm mb-1">
-                <span style={{ color: T.ink }}>Yêu cầu đang chờ / đang xử lý</span>
-                <span className="f-mono font-semibold" style={{ color: pendingMaint > 0 ? T.red : T.green }}>{pendingMaint}</span>
-              </div>
-              <div className="flex items-center justify-between f-body text-sm mb-1">
-                <span style={{ color: T.ink }}>Tổng số yêu cầu đã ghi nhận</span>
-                <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
-              </div>
-              {isAllowed("assets") && (
-                <div className="flex items-center justify-between f-body text-sm">
-                  <span style={{ color: T.ink }}>Tài sản hỏng / tổng tài sản</span>
-                  <span className="f-mono font-semibold" style={{ color: brokenAssets > 0 ? T.red : T.green }}>{brokenAssets} / {assets.length}</span>
+
+              <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.inkSoft }}>Yêu cầu sửa chữa</div>
+              <div className="space-y-1 mb-3">
+                {MAINT_STATUS.map((s) => (
+                  <div key={s} className="flex items-center justify-between f-body text-sm">
+                    <span style={{ color: T.ink }}>{s}</span>
+                    <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : s === "Đang xử lý" ? T.amberDark : T.green }}>{maintByStatus[s] || 0}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                  <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
+                  <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
                 </div>
+              </div>
+
+              {isAllowed("assets") && (
+                <>
+                  <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.inkSoft }}>Tài sản</div>
+                  <div className="space-y-1">
+                    {ASSET_STATUS.map((s) => (
+                      <div key={s} className="flex items-center justify-between f-body text-sm">
+                        <span style={{ color: T.ink }}>{s}</span>
+                        <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : s === "Đang sửa" ? T.amberDark : T.green }}>{assetByStatus[s] || 0}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+                      <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
+                      <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
