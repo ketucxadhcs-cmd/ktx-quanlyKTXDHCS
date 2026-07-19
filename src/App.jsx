@@ -4214,10 +4214,11 @@ function UtilitiesTab({ perm, user }) {
       {months.length > 0 && (
         <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
           <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Thống kê tiêu thụ theo tháng</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm f-body table-lines">
+          <div className="overflow-x-auto overflow-y-auto scrollbar-thin" style={{ maxHeight: 5 * 44 + 40 }}>
+            <table className="w-full text-sm f-body table-lines table-grid">
               <thead>
-                <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                  <th className="text-center px-3 py-2 w-12">STT</th>
                   <th className="text-left px-3 py-2">Tháng</th>
                   <th className="text-left px-3 py-2">Số phòng có dữ liệu</th>
                   <th className="text-left px-3 py-2">Tổng điện tiêu thụ (kWh)</th>
@@ -4229,6 +4230,7 @@ function UtilitiesTab({ perm, user }) {
                   const t = monthTotal(m);
                   return (
                     <tr key={m} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                      <td className="px-3 py-2 f-mono text-center" style={{ color: T.inkSoft }}>{i + 1}</td>
                       <td className="px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{formatMonth(m)}</td>
                       <td className="px-3 py-2 f-mono">{t.count}</td>
                       <td className="px-3 py-2 f-mono">{t.elec}</td>
