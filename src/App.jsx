@@ -983,10 +983,24 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
   const previewRows = srcMode === "file" ? mappedFileRows : (ocrRows || []);
   const [selectedRows, setSelectedRows] = useState({});
   const isDup = (r) => existingItems.some((s) => isSameStudentRecord(r, s));
+  // Dò xem 1 chuỗi có "giống tên người" hay không — để loại các dòng rác lẫn vào cột Họ và tên khi đọc
+  // file/ảnh (VD: tiêu đề trang, ghi chú ngày tháng, dòng tiêu đề bị lặp lại...) ra khỏi việc tick chọn hàng loạt.
+  const looksLikePersonName = (name) => {
+    const s = String(name || "").trim();
+    if (!s) return false;
+    if (/[()[\]{}:;.,]/.test(s)) return false; // tên người không chứa ngoặc, dấu hai chấm, dấu phẩy…
+    if (/\d/.test(s)) return false; // không chứa chữ số
+    if (s.length > 40) return false; // tên người Việt hiếm khi dài hơn 40 ký tự
+    const words = s.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 6) return false; // họ tên tiếng Việt thường 2–6 từ
+    const bannedPhrases = /danh\s*sách|cập\s*nhật|trang\s*web|blog|cán\s*bộ|đảng\s*viên|họ\s*và\s*tên|họ\s*tên|ghi\s*chú|biểu\s*mẫu|báo\s*cáo|thống\s*kê|hướng\s*dẫn|quy\s*định|thông\s*báo|danh\s*mục/i;
+    if (bannedPhrases.test(s)) return false; // loại các cụm từ khoá thường gặp trong tiêu đề/mô tả
+    return words.every((w) => w[0] === w[0].toUpperCase()); // mỗi từ trong tên phải viết hoa chữ cái đầu
+  };
 
   useEffect(() => {
     const next = {};
-    previewRows.forEach((r, i) => { next[i] = Boolean(r.name) && !isDup(r); });
+    previewRows.forEach((r, i) => { next[i] = Boolean(r.name) && looksLikePersonName(r.name) && !isDup(r); });
     setSelectedRows(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mappedFileRows.length, ocrRows]);
@@ -1006,12 +1020,12 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
     (!qKhoa || (r.khoa || "").trim() === qKhoa) &&
     (!qLop || (r.lop || "").trim() === qLop) &&
     (!qNamHoc || (r.namHoc || "").trim() === qNamHoc);
-  const quickMatchCount = previewRows.filter((r) => r.name && matchesQuick(r)).length;
-  const selectAllRows = () => setSelectedRows(previewRows.reduce((acc, r, i) => { acc[i] = Boolean(r.name); return acc; }, {}));
+  const quickMatchCount = previewRows.filter((r) => r.name && looksLikePersonName(r.name) && matchesQuick(r)).length;
+  const selectAllRows = () => setSelectedRows(previewRows.reduce((acc, r, i) => { acc[i] = Boolean(r.name) && looksLikePersonName(r.name); return acc; }, {}));
   const clearAllRows = () => setSelectedRows({});
   const selectByQuick = () => setSelectedRows((s) => {
     const next = { ...s };
-    previewRows.forEach((r, i) => { if (r.name && matchesQuick(r)) next[i] = true; });
+    previewRows.forEach((r, i) => { if (r.name && looksLikePersonName(r.name) && matchesQuick(r)) next[i] = true; });
     return next;
   });
   const deselectByQuick = () => setSelectedRows((s) => {
@@ -1228,6 +1242,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
                         <td className="px-2 py-1.5 f-mono">{r.msv || "—"}</td>
                         <td className="px-2 py-1.5 font-medium">
                           {r.name || <span className="italic" style={{ color: T.inkSoft }}>(thiếu tên — sẽ bị bỏ qua)</span>}
+                          {r.name && !looksLikePersonName(r.name) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.amberDark }}>· Không giống tên người</span>}
                           {isDup(r) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.red }}>· Trùng đã có</span>}
                         </td>
                         <td className="px-2 py-1.5">{r.gender || "—"}</td>
