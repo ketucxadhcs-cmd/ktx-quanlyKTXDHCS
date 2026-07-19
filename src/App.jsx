@@ -4251,12 +4251,32 @@ function DocsTab({ user, perm }) {
               <div className="f-display text-sm uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: T.amberDark }}><ChevronRight size={14} />{subj}</div>
               <div className="space-y-2">
                 {docs.map((d) => (
-                  <div key={d.id} onClick={() => toggleSelect(d.id)} className="flex items-center justify-between p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === d.id)}>
-                    <div>
-                      <div className="f-body text-sm font-medium" style={{ color: T.ink }}>{d.title}</div>
-                      {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="f-mono text-xs underline break-all" style={{ color: T.green }}>{d.url}</a>}
+                  <div key={d.id} onClick={() => toggleSelect(d.id)} className="flex items-center justify-between p-3 cursor-pointer gap-3" style={withSelect({ background: "#fff" }, selectedId === d.id)}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {d.url && isImageAttachment({ url: d.url }) && (
+                        <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="Xem ảnh" className="shrink-0">
+                          <img src={d.url} alt={d.title} className="w-14 h-14 object-cover stamp-border" />
+                        </a>
+                      )}
+                      <div className="min-w-0">
+                        <div className="f-body text-sm font-medium" style={{ color: T.ink }}>{d.title}</div>
+                        {d.url && <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="f-mono text-xs underline break-all" style={{ color: T.green }}>{d.url}</a>}
+                      </div>
                     </div>
-                    {(perm.canManage || perm.isOwner(d.by)) && <button onClick={() => remove(d.id)}><Trash2 size={14} style={{ color: T.red }} /></button>}
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {d.url && (
+                        <button
+                          type="button"
+                          onClick={() => downloadFileFromUrl(d.url, d.title || `tai-lieu-${d.id}`)}
+                          title="Tải về"
+                          className="flex items-center gap-1 px-2 py-1 rounded-sm f-mono text-[10px] uppercase tracking-wide btn-press"
+                          style={{ border: `1px solid ${T.green}`, color: T.green, background: "transparent" }}
+                        >
+                          <Upload size={12} style={{ transform: "rotate(180deg)" }} /> Tải về
+                        </button>
+                      )}
+                      {(perm.canManage || perm.isOwner(d.by)) && <button onClick={() => remove(d.id)} title="Xoá"><Trash2 size={14} style={{ color: T.red }} /></button>}
+                    </div>
                   </div>
                 ))}
               </div>
