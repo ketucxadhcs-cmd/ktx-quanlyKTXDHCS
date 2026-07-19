@@ -38,12 +38,15 @@ function withSelect(style, selected) {
 }
 
 const KTX_PASSWORD_DEFAULT = "KTXCSND"; // Mật khẩu chung mặc định — đổi được ở mục "Đổi mật khẩu"
+const MANAGER_PASSWORD_DEFAULT = "KTXCANBO"; // Mật khẩu quản lý ký túc xá mặc định — đổi được ở mục "Đổi mật khẩu"
 const ADMIN_PASSWORD_DEFAULT = "KTXADMIN"; // Mật khẩu quản trị mặc định — đổi được ở mục "Đổi mật khẩu"
 const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký túc xá (không lẫn dữ liệu khác)
 
 /* ============ PHÂN QUYỀN ============
    admin  : đăng nhập bằng ADMIN_PASSWORD — toàn quyền, kể cả gán quyền cho người khác
-   can_bo : được quản trị gán — quyền quản lý phòng ở, sinh viên, tài sản, cập nhật bảo trì (Ban quản lý / Kỹ thuật KTX)
+   can_bo : đăng nhập bằng MANAGER_PASSWORD (mật khẩu quản lý ký túc xá) — quyền quản lý phòng ở, sinh viên,
+            tài sản, cập nhật bảo trì (Ban quản lý / Cán bộ quản lý ký túc xá); hoặc được quản trị gán riêng
+            qua mục Phân quyền cho một tên cụ thể khi đăng nhập bằng mật khẩu chung
    sinh_vien: mặc định — chỉ được gửi yêu cầu bảo trì và xem thông tin, tự xoá yêu cầu do chính mình gửi
 */
 const normalizeName = (n) => (n || "").trim().toLowerCase();
@@ -391,7 +394,7 @@ function useSingleDoc(key, defaultValue) {
 }
 
 function useAuthConfig() {
-  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
+  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, managerPassword: MANAGER_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -404,6 +407,7 @@ function useAuthConfig() {
             const parsed = JSON.parse(snap.data().value);
             setConfigState({
               unitPassword: parsed.unitPassword || KTX_PASSWORD_DEFAULT,
+              managerPassword: parsed.managerPassword || MANAGER_PASSWORD_DEFAULT,
               adminPassword: parsed.adminPassword || ADMIN_PASSWORD_DEFAULT,
             });
           } catch (e) {
@@ -432,12 +436,12 @@ function useAuthConfig() {
 }
 
 /* ============ PHÂN QUYỀN THEO NGƯỜI DÙNG ============ */
-function useRole(user, isAdminLogin) {
+function useRole(user, forcedLoginRole) {
   const { items: permissions, setItems: setPermissions, loading: permLoading } = useSharedList("permissions");
   const explicit = permissions.find((p) => normalizeName(p.name) === normalizeName(user));
 
   let role = "sinh_vien";
-  if (isAdminLogin) role = "admin";
+  if (forcedLoginRole) role = forcedLoginRole;
   else if (explicit) role = explicit.role;
 
   const canManage = role === "admin" || role === "can_bo";
@@ -639,14 +643,18 @@ function LoginGate({ onLogin }) {
       return;
     }
     if (pw === config.adminPassword) {
-      onLogin(name.trim(), true);
+      onLogin(name.trim(), "admin");
+      return;
+    }
+    if (pw === config.managerPassword) {
+      onLogin(name.trim(), "can_bo");
       return;
     }
     if (pw !== config.unitPassword) {
       setErr("Mật khẩu không đúng. Liên hệ Ban quản lý ký túc xá để lấy mật khẩu.");
       return;
     }
-    onLogin(name.trim(), false);
+    onLogin(name.trim(), null);
   };
 
   return (
@@ -4746,6 +4754,7 @@ function BackupSection() {
 function PasswordTab({ user, perm }) {
   const { config, setConfig, loading } = useAuthConfig();
   const [unitPw, setUnitPw] = useState("");
+  const [managerPw, setManagerPw] = useState("");
   const [adminPw, setAdminPw] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
@@ -4753,14 +4762,28 @@ function PasswordTab({ user, perm }) {
 
   useEffect(() => {
     setUnitPw(config.unitPassword);
+    setManagerPw(config.managerPassword);
     setAdminPw(config.adminPassword);
-  }, [config.unitPassword, config.adminPassword]);
+  }, [config.unitPassword, config.managerPassword, config.adminPassword]);
 
+  // Cán bộ quản lý (can_bo) chỉ được xem/đổi mật khẩu Học viên và mật khẩu Quản lý ký túc xá của chính mình —
+  // KHÔNG được xem hay đổi mật khẩu Quản trị. Chỉ tài khoản Quản trị mới toàn quyền với cả 3 mật khẩu.
   const saveAdmin = async () => {
-    if (!unitPw.trim() || !adminPw.trim()) { setWarn("Vui lòng nhập đủ cả Mật khẩu chung ký túc xá và Mật khẩu quản trị trước khi lưu."); return; }
+    if (!unitPw.trim() || !managerPw.trim() || (perm.isAdmin && !adminPw.trim())) {
+      setWarn(
+        perm.isAdmin
+          ? "Vui lòng nhập đủ cả 3 mật khẩu (Chung ký túc xá, Quản lý ký túc xá, Quản trị) trước khi lưu."
+          : "Vui lòng nhập đủ Mật khẩu chung ký túc xá và Mật khẩu quản lý ký túc xá trước khi lưu."
+      );
+      return;
+    }
     setWarn("");
     setSaving(true);
-    const ok = await setConfig({ unitPassword: unitPw.trim(), adminPassword: adminPw.trim() });
+    const ok = await setConfig({
+      unitPassword: unitPw.trim(),
+      managerPassword: managerPw.trim(),
+      adminPassword: perm.isAdmin ? adminPw.trim() : config.adminPassword,
+    });
     setSaving(false);
     setStatus(ok ? "Đã lưu mật khẩu mới. Áp dụng ngay từ lần đăng nhập tiếp theo." : "Lưu thất bại, thử lại nhé.");
     setTimeout(() => setStatus(""), 4000);
@@ -4772,16 +4795,22 @@ function PasswordTab({ user, perm }) {
       {loading ? <LoadingRow /> : (
         <div className="stamp-border p-4" style={{ background: "#fff" }}>
           <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
-            Bạn là Quản trị — đổi được mật khẩu chung ký túc xá và mật khẩu quản trị. Mật khẩu mới áp dụng ngay từ lần
-            đăng nhập tiếp theo của mọi người.
+            {perm.isAdmin
+              ? "Bạn là Quản trị — đổi được cả 3 mật khẩu: mật khẩu chung ký túc xá, mật khẩu quản lý ký túc xá và mật khẩu quản trị. Mật khẩu mới áp dụng ngay từ lần đăng nhập tiếp theo của mọi người."
+              : "Bạn là Cán bộ quản lý ký túc xá — đổi được mật khẩu chung ký túc xá (Học viên) và mật khẩu quản lý ký túc xá. Mật khẩu quản trị chỉ Quản trị viên mới xem và đổi được."}
           </p>
           <FormWarning message={warn} />
           <Field label="Mật khẩu chung ký túc xá (dùng để đăng nhập thường)" required>
             <PasswordInput value={unitPw} onChange={(e) => setUnitPw(e.target.value)} />
           </Field>
-          <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
-            <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
+          <Field label="Mật khẩu quản lý ký túc xá (đăng nhập với quyền Cán bộ quản lý)" required>
+            <PasswordInput value={managerPw} onChange={(e) => setManagerPw(e.target.value)} />
           </Field>
+          {perm.isAdmin && (
+            <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
+              <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
+            </Field>
+          )}
           <Btn onClick={saveAdmin} disabled={saving}>{saving ? "Đang lưu…" : "Lưu mật khẩu"}</Btn>
           {status && <div className="f-body text-xs mt-3" style={{ color: T.green }}>{status}</div>}
         </div>
@@ -5379,7 +5408,7 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
 
   return (
     <div>
-      <SectionHeader icon={Shield} eyebrow="Chỉ quản trị" title="Phân quyền người dùng" />
+      <SectionHeader icon={Shield} eyebrow="Quản trị & Cán bộ quản lý" title="Phân quyền người dùng" />
 
       <BackupSection />
 
@@ -5497,14 +5526,14 @@ const TAB_ROLES = {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [isAdminLogin, setIsAdminLogin] = useState(false);
+  const [loginRole, setLoginRole] = useState(null);
   const [tab, setTab] = useState("home");
   const [navOpen, setNavOpen] = useState(false);
   const { value: managerInfo, setValue: setManagerInfo } = useSingleDoc("managerInfo", { name: "", phone: "" });
   const [editingManager, setEditingManager] = useState(false);
   const [managerForm, setManagerForm] = useState({ name: "", phone: "" });
 
-  const { perm, permissions, setPermissions, permLoading } = useRole(user, isAdminLogin);
+  const { perm, permissions, setPermissions, permLoading } = useRole(user, loginRole);
 
   // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
   // đổi quyền của mình, hoặc Học viên lỡ đứng ở mục không dành cho mình), tự động đưa về Tổng quan.
@@ -5512,13 +5541,14 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const allowed = tab === "reports" ? perm.canManage
-      : (tab === "password" || tab === "permissions") ? perm.isAdmin
+      : tab === "password" ? perm.canManage
+      : tab === "permissions" ? perm.canManage
       : (TAB_ROLES[tab] || []).includes(perm.role);
     if (!allowed) setTab("home");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perm.role, user]);
 
-  if (!user) return <LoginGate onLogin={(name, admin) => { setUser(name); setIsAdminLogin(!!admin); }} />;
+  if (!user) return <LoginGate onLogin={(name, role) => { setUser(name); setLoginRole(role); }} />;
 
   const roleBadge = { admin: "Quản trị", can_bo: "Cán bộ quản lý", ky_thuat: "Kỹ thuật", sinh_vien: "Học viên" };
   const canEditManager = perm.canManage;
@@ -5531,7 +5561,7 @@ export default function App() {
   const renderTab = () => {
     const isReportsOrAdminTab = tab === "reports" || tab === "password" || tab === "permissions";
     const allowedForTab = isReportsOrAdminTab
-      ? (tab === "reports" ? perm.canManage : perm.isAdmin)
+      ? perm.canManage
       : (TAB_ROLES[tab] || []).includes(perm.role);
     if (!allowedForTab) return <DashboardTab perm={perm} onNavigate={goToTab} />;
     switch (tab) {
@@ -5556,8 +5586,8 @@ export default function App() {
   const visibleTabs = [
     ...TABS.filter((t) => (TAB_ROLES[t.id] || []).includes(perm.role)),
     ...(perm.canManage ? [{ id: "reports", label: "Báo cáo - Thống kê", icon: ClipboardCheck }] : []),
-    ...(perm.isAdmin ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
-    ...(perm.isAdmin ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
+    ...(perm.canManage ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
+    ...(perm.canManage ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
   ];
   const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
   const RoleIcon = roleIcon[perm.role] || Users;
