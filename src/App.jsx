@@ -3909,39 +3909,85 @@ function DocsTab({ user, perm }) {
 
 /* ============ SAO LƯU & KHÔI PHỤC ============ */
 const ALL_DATA_KEYS = ["rooms", "students", "assets", "maintenance", "docs", "permissions", "authConfig", "managerInfo"];
+const AUTO_BACKUP_INTERVALS = [
+  { value: 0, label: "Tắt — không tự động" },
+  { value: 1, label: "Hằng ngày" },
+  { value: 3, label: "Mỗi 3 ngày" },
+  { value: 7, label: "Hằng tuần" },
+  { value: 30, label: "Hằng tháng" },
+];
+const AUTO_BACKUP_DEFAULT = { intervalDays: 0, lastBackupAt: "" };
+
+// Gom toàn bộ dữ liệu và tải về máy dưới dạng file .json — dùng chung cho cả bấm tay và tự động định kỳ.
+async function runBackupExport() {
+  const data = {};
+  for (const k of ALL_DATA_KEYS) {
+    try {
+      const snap = await getDoc(doc(db, DATA_NS, k));
+      data[k] = snap.exists() && snap.data().value ? JSON.parse(snap.data().value) : [];
+    } catch (e) {
+      data[k] = [];
+    }
+  }
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `sao-luu-ktx-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Chạy nền (không hiện giao diện): mỗi khi Quản trị/Cán bộ mở trang, kiểm tra xem đã đến kỳ sao lưu tự động
+// chưa (theo cấu hình chọn ở mục Phân quyền) — nếu quá hạn thì tự tải file sao lưu về và cập nhật mốc thời gian.
+// Lưu ý: đây là "tự động khi có người quản lý mở trang", không phải chạy nền server 24/7 khi không ai mở web.
+function AutoBackupRunner() {
+  const { value: cfg, setValue: setCfg, loading } = useSingleDoc("autoBackupConfig", AUTO_BACKUP_DEFAULT);
+  const checkedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || checkedRef.current) return;
+    checkedRef.current = true;
+    const days = Number(cfg.intervalDays) || 0;
+    if (days <= 0) return;
+    const last = cfg.lastBackupAt ? new Date(cfg.lastBackupAt).getTime() : 0;
+    const dueAt = last + days * 24 * 60 * 60 * 1000;
+    if (Date.now() >= dueAt) {
+      runBackupExport()
+        .then(() => setCfg({ ...cfg, lastBackupAt: new Date().toISOString() }))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  return null;
+}
 
 function BackupSection() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const { value: autoCfg, setValue: setAutoCfg, loading: autoLoading } = useSingleDoc("autoBackupConfig", AUTO_BACKUP_DEFAULT);
+  const [savingAuto, setSavingAuto] = useState(false);
 
   const exportBackup = async () => {
     setBusy(true);
     setStatus("Đang gom dữ liệu…");
     try {
-      const data = {};
-      for (const k of ALL_DATA_KEYS) {
-        try {
-          const snap = await getDoc(doc(db, DATA_NS, k));
-          data[k] = snap.exists() && snap.data().value ? JSON.parse(snap.data().value) : [];
-        } catch (e) {
-          data[k] = [];
-        }
-      }
-      const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `sao-luu-ktx-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await runBackupExport();
       setStatus("Đã tải file sao lưu về máy.");
     } catch (e) {
       setStatus("Lỗi khi sao lưu, thử lại nhé.");
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveAutoBackup = async (intervalDays) => {
+    setSavingAuto(true);
+    await setAutoCfg({ ...autoCfg, intervalDays: Number(intervalDays) });
+    setSavingAuto(false);
   };
 
   const restoreBackup = async (file) => {
@@ -3983,6 +4029,33 @@ function BackupSection() {
         </label>
       </div>
       {status && <div className="f-body text-xs mt-3" style={{ color: T.inkSoft }}>{status}</div>}
+
+      <div className="mt-4 pt-4" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+        <div className="f-mono text-[10px] uppercase tracking-widest mb-1.5" style={{ color: T.inkSoft }}>Tự động sao lưu định kỳ</div>
+        <p className="f-body text-xs mb-2" style={{ color: T.inkSoft }}>
+          Chọn chu kỳ bên dưới: mỗi khi có Quản trị/Cán bộ quản lý mở trang mà đã quá hạn kỳ sao lưu, hệ thống sẽ
+          tự động tải file sao lưu (.json) về máy của người đó — không cần bấm tay. Lưu ý: đây là tự động "khi có
+          người mở trang", không phải chạy nền 24/7 khi không ai truy cập.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            className={inputCls}
+            style={{ ...inputStyle, width: "auto" }}
+            value={autoCfg.intervalDays || 0}
+            disabled={autoLoading || savingAuto}
+            onChange={(e) => saveAutoBackup(e.target.value)}
+          >
+            {AUTO_BACKUP_INTERVALS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <span className="f-body text-xs" style={{ color: T.inkSoft }}>
+            {Number(autoCfg.intervalDays) > 0
+              ? (autoCfg.lastBackupAt
+                  ? `Lần sao lưu gần nhất: ${formatDateTime(autoCfg.lastBackupAt)}`
+                  : "Chưa có lần sao lưu tự động nào — sẽ tải ngay ở lượt mở trang tiếp theo của Quản trị/Cán bộ.")
+              : "Đang tắt tự động sao lưu."}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4766,6 +4839,7 @@ export default function App() {
     <div className="min-h-screen paper-tex f-body" style={{ color: T.ink }}>
       <style>{FONT_STYLE}</style>
       <ErrorBanner />
+      {perm.canManage && <AutoBackupRunner />}
 
       <header
         className="flex items-center justify-between px-4 md:px-6 py-3 relative z-30"
