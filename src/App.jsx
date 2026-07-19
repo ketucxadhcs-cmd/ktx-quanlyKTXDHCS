@@ -1383,7 +1383,7 @@ function DashboardTab({ perm, onNavigate }) {
                       <th className="text-center px-3 py-2">Số phòng</th>
                       <th className="text-center px-3 py-2">Sức chứa</th>
                       <th className="text-center px-3 py-2">Đang ở</th>
-                      <th className="text-center px-3 py-2">Còn trống</th>
+                      <th className="text-center px-3 py-2">Phòng còn trống</th>
                       <th className="text-center px-3 py-2">Bảo trì</th>
                     </tr>
                   </thead>
