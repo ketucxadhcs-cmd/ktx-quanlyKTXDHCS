@@ -3671,7 +3671,6 @@ function MaintenanceTab({ perm, user }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ roomId: "", title: "", description: "", imageUrl: "" });
   const [warn, setWarn] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [noteDraft, setNoteDraft] = useState({});
   const [assignDraft, setAssignDraft] = useState({});
@@ -3719,8 +3718,11 @@ function MaintenanceTab({ perm, user }) {
     ? requests
     : requests.filter((r) => perm.isOwner(r.reporterName) || (myRoomId != null && String(r.roomId) === String(myRoomId)));
 
-  const filtered = filterStatus ? visibleByRole.filter((r) => r.status === filterStatus) : visibleByRole;
   const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
+  // Chia danh sách thành 4 nhóm cố định theo trạng thái (Chờ xử lý → Đang xử lý → Hoàn thành → Từ chối, từ trên xuống),
+  // mỗi nhóm hiển thị khoảng 4 dòng rồi cuộn riêng bên trong nhóm đó — dễ theo dõi tổng quan, không bị lẫn lộn trạng thái.
+  const groupedByStatus = MAINT_STATUS.map((s) => ({ status: s, list: visibleByRole.filter((r) => r.status === s) }));
+  const MAINT_GROUP_MAX_HEIGHT = 560; // chiều cao xấp xỉ 4 thẻ yêu cầu, nhiều hơn thì cuộn dọc
 
   return (
     <div>
@@ -3761,92 +3763,103 @@ function MaintenanceTab({ perm, user }) {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="">— Tất cả trạng thái —</option>
-          {MAINT_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-
-      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có yêu cầu bảo trì nào." /> : (
-        <div className="space-y-3">
-          {filtered.map((r) => {
-            const room = rooms.find((x) => x.id === r.roomId);
-            return (
-              <div key={r.id} onClick={() => setSelectedId((id) => (id === r.id ? null : r.id))} className="stamp-border p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === r.id)}>
-                <div className="flex items-start justify-between gap-2 flex-wrap">
-                  <div>
-                    <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{r.title}</div>
-                    <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
-                      {room ? roomLabel(room) : "—"} · Người gửi: {r.reporterName} · {formatDateTime(r.createdAt)}
-                    </div>
-                  </div>
-                  <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status] || T.green, color: "#fff" }}>{r.status}</span>
-                </div>
-                {r.description && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{r.description}</div>}
-                {r.imageUrl && <img src={r.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
-
-                {perm.canMaintain && (
-                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
-                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Phân công kỹ thuật:</span>
-                    <input
-                      list="technician-names"
-                      className={inputCls}
-                      style={{ ...inputStyle, fontSize: "12px", width: 200 }}
-                      placeholder="Tên người phụ trách…"
-                      value={assignDraft[r.id] ?? r.assignedTo ?? ""}
-                      onChange={(e) => setAssignDraft((d) => ({ ...d, [r.id]: e.target.value }))}
-                    />
-                    <datalist id="technician-names">
-                      {technicians.map((t) => <option key={t} value={t} />)}
-                    </datalist>
-                    <Btn size="sm" variant="outline" onClick={() => saveAssign(r.id)}>Lưu</Btn>
-                  </div>
-                )}
-                {!perm.canMaintain && r.assignedTo && (
-                  <div className="f-body text-xs mt-2" style={{ color: T.inkSoft }}>Phụ trách: <b style={{ color: T.ink }}>{r.assignedTo}</b></div>
-                )}
-
-                {perm.canMaintain && (
-                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
-                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Cập nhật trạng thái:</span>
-                    {MAINT_STATUS.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => updateStatus(r.id, s)}
-                        className="f-display text-[10px] uppercase tracking-wide px-2 py-1 rounded-sm btn-press"
-                        style={{ background: r.status === s ? (statusColor[s] || T.green) : "transparent", color: r.status === s ? "#fff" : T.green, border: `1px solid ${statusColor[s] || T.green}` }}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {perm.canMaintain && (
-                  <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      className={inputCls}
-                      style={{ ...inputStyle, fontSize: "12px" }}
-                      placeholder="Ghi chú của bộ phận kỹ thuật…"
-                      value={noteDraft[r.id] ?? r.technicianNote ?? ""}
-                      onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
-                    />
-                    <Btn size="sm" onClick={() => saveNote(r.id)}>Lưu ghi chú</Btn>
-                  </div>
-                )}
-                {!perm.canMaintain && r.technicianNote && (
-                  <div className="f-body text-xs mt-2 italic" style={{ color: T.inkSoft }}>Ghi chú kỹ thuật: {r.technicianNote}</div>
-                )}
-
-                {canDelete(r) && (
-                  <div className="mt-2 text-right" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => remove(r.id)} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá yêu cầu</button>
-                  </div>
-                )}
+      {loading ? <LoadingRow /> : visibleByRole.length === 0 ? <EmptyState text="Chưa có yêu cầu bảo trì nào." /> : (
+        <div className="space-y-4">
+          {groupedByStatus.map(({ status, list }) => (
+            <div key={status}>
+              <div
+                className="f-display text-[11px] font-bold uppercase tracking-wider mb-2 px-3 py-2 rounded-sm flex items-center justify-between"
+                style={{ color: "#fff", background: statusColor[status] || T.green, boxShadow: `inset 0 0 0 1px ${T.gold}` }}
+              >
+                <span>{status}</span>
+                <span className="f-mono text-[10.5px]">{list.length}</span>
               </div>
-            );
-          })}
+
+              {list.length === 0 ? (
+                <div className="f-body text-xs italic px-1 pb-1" style={{ color: T.inkSoft }}>Không có yêu cầu nào.</div>
+              ) : (
+                <div className="space-y-3 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: MAINT_GROUP_MAX_HEIGHT }}>
+                  {list.map((r) => {
+                    const room = rooms.find((x) => x.id === r.roomId);
+                    return (
+                      <div key={r.id} onClick={() => setSelectedId((id) => (id === r.id ? null : r.id))} className="stamp-border p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === r.id)}>
+                        <div className="flex items-start justify-between gap-2 flex-wrap">
+                          <div>
+                            <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{r.title}</div>
+                            <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
+                              {room ? roomLabel(room) : "—"} · Người gửi: {r.reporterName} · {formatDateTime(r.createdAt)}
+                            </div>
+                          </div>
+                          <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status] || T.green, color: "#fff" }}>{r.status}</span>
+                        </div>
+                        {r.description && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{r.description}</div>}
+                        {r.imageUrl && <img src={r.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
+
+                        {perm.canMaintain && (
+                          <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                            <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Phân công kỹ thuật:</span>
+                            <input
+                              list="technician-names"
+                              className={inputCls}
+                              style={{ ...inputStyle, fontSize: "12px", width: 200 }}
+                              placeholder="Tên người phụ trách…"
+                              value={assignDraft[r.id] ?? r.assignedTo ?? ""}
+                              onChange={(e) => setAssignDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                            />
+                            <datalist id="technician-names">
+                              {technicians.map((t) => <option key={t} value={t} />)}
+                            </datalist>
+                            <Btn size="sm" variant="outline" onClick={() => saveAssign(r.id)}>Lưu</Btn>
+                          </div>
+                        )}
+                        {!perm.canMaintain && r.assignedTo && (
+                          <div className="f-body text-xs mt-2" style={{ color: T.inkSoft }}>Phụ trách: <b style={{ color: T.ink }}>{r.assignedTo}</b></div>
+                        )}
+
+                        {perm.canMaintain && (
+                          <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                            <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Cập nhật trạng thái:</span>
+                            {MAINT_STATUS.map((s) => (
+                              <button
+                                key={s}
+                                onClick={() => updateStatus(r.id, s)}
+                                className="f-display text-[10px] uppercase tracking-wide px-2 py-1 rounded-sm btn-press"
+                                style={{ background: r.status === s ? (statusColor[s] || T.green) : "transparent", color: r.status === s ? "#fff" : T.green, border: `1px solid ${statusColor[s] || T.green}` }}
+                              >
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {perm.canMaintain && (
+                          <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              className={inputCls}
+                              style={{ ...inputStyle, fontSize: "12px" }}
+                              placeholder="Ghi chú của bộ phận kỹ thuật…"
+                              value={noteDraft[r.id] ?? r.technicianNote ?? ""}
+                              onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                            />
+                            <Btn size="sm" onClick={() => saveNote(r.id)}>Lưu ghi chú</Btn>
+                          </div>
+                        )}
+                        {!perm.canMaintain && r.technicianNote && (
+                          <div className="f-body text-xs mt-2 italic" style={{ color: T.inkSoft }}>Ghi chú kỹ thuật: {r.technicianNote}</div>
+                        )}
+
+                        {canDelete(r) && (
+                          <div className="mt-2 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => remove(r.id)} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá yêu cầu</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
