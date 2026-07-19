@@ -3642,9 +3642,23 @@ function UtilitiesTab({ perm, user }) {
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [filterBuilding, setFilterBuilding] = useState("");
+  const [filterArea, setFilterArea] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [editWarn, setEditWarn] = useState("");
+  const [showMissing, setShowMissing] = useState(false);
+
+  // Danh mục toà/tầng để lọc nhanh khi số phòng lên tới hàng trăm/nghìn — cùng cách làm với tab Sinh viên nội trú.
+  const buildingOptions = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
+  const areaOptions = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
+  const roomsSorted = [...rooms].sort((a, b) => naturalCompare(a.building || "", b.building || "") || naturalCompare(a.area || "", b.area || "") || naturalCompare(String(a.roomNumber || ""), String(b.roomNumber || "")));
+  // Gom theo toà nhà để hiện dạng optgroup trong select — dễ tìm phòng khi danh sách rất dài.
+  const roomGroups = buildingOptions.map((b) => ({ building: b, rooms: roomsSorted.filter((r) => (r.building || "") === b) }));
+  const roomsNoBuilding = roomsSorted.filter((r) => !r.building);
 
   const submit = async () => {
     if (!form.roomId || !form.month) { setWarn("Vui lòng chọn Phòng và Tháng trước khi lưu."); return; }
@@ -3690,7 +3704,36 @@ function UtilitiesTab({ perm, user }) {
   });
 
   const months = [...new Set(records.map((r) => r.month))].sort().reverse();
-  const filtered = withUsage.filter((r) => !filterMonth || r.month === filterMonth).sort((a, b) => String(b.month).localeCompare(String(a.month)));
+  const q = search.trim().toLowerCase();
+  const filtered = withUsage
+    .filter((r) => {
+      const room = rooms.find((x) => x.id === r.roomId);
+      if (filterMonth && r.month !== filterMonth) return false;
+      if (filterBuilding && room?.building !== filterBuilding) return false;
+      if (filterArea && room?.area !== filterArea) return false;
+      if (q) {
+        const hay = [room ? roomLabel(room) : "", room?.building, room?.area].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (filterMonth) {
+        const ra = rooms.find((x) => x.id === a.roomId), rb = rooms.find((x) => x.id === b.roomId);
+        return naturalCompare(ra?.building || "", rb?.building || "") || naturalCompare(ra?.area || "", rb?.area || "") || naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || ""));
+      }
+      return String(b.month).localeCompare(String(a.month));
+    });
+
+  // Phòng nào CHƯA có chỉ số của tháng đang lọc — quan trọng khi số phòng lên tới hàng trăm/nghìn, để
+  // biết còn thiếu dữ liệu ở đâu mà nhắc nhở, thay vì phải dò thủ công qua từng phòng.
+  const missingRooms = filterMonth
+    ? roomsSorted.filter((r) => !records.some((rec) => String(rec.roomId) === String(r.id) && rec.month === filterMonth))
+    : [];
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageClamped = Math.min(page, totalPages);
+  const paged = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
 
   const monthTotal = (month) => {
     const rows = withUsage.filter((r) => r.month === month);
@@ -3717,7 +3760,16 @@ function UtilitiesTab({ perm, user }) {
           <Field label="Phòng" required>
             <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
               <option value="">— Chọn phòng —</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+              {roomGroups.map((g) => (
+                <optgroup key={g.building} label={`Toà ${g.building}`}>
+                  {g.rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+                </optgroup>
+              ))}
+              {roomsNoBuilding.length > 0 && (
+                <optgroup label="Chưa rõ toà nhà">
+                  {roomsNoBuilding.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+                </optgroup>
+              )}
             </select>
           </Field>
           <Field label="Tháng" required>
@@ -3764,14 +3816,52 @@ function UtilitiesTab({ perm, user }) {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+      <div className="flex flex-wrap gap-3 mb-3">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.inkSoft }} />
+          <input className={inputCls} style={{ ...inputStyle, paddingLeft: 30 }} value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Tìm theo phòng, toà, tầng…" />
+        </div>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => { setFilterBuilding(e.target.value); setFilterArea(""); setPage(1); }}>
+          <option value="">— Tất cả toà nhà —</option>
+          {buildingOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterArea} onChange={(e) => { setFilterArea(e.target.value); setPage(1); }}>
+          <option value="">— Tất cả tầng/khu vực —</option>
+          {areaOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterMonth} onChange={(e) => { setFilterMonth(e.target.value); setPage(1); }}>
           <option value="">— Tất cả các tháng —</option>
           {months.map((m) => <option key={m} value={m}>{formatMonth(m)}</option>)}
         </select>
       </div>
 
+      {filterMonth && (
+        <div className="stamp-border p-3 mb-4" style={{ background: missingRooms.length > 0 ? "rgba(197,90,17,0.06)" : "#fff" }}>
+          <button type="button" onClick={() => setShowMissing((s) => !s)} className="flex items-center justify-between w-full">
+            <span className="f-body text-sm" style={{ color: missingRooms.length > 0 ? T.amberDark : T.green }}>
+              {missingRooms.length > 0
+                ? `⚠ Còn ${missingRooms.length} phòng chưa nhập chỉ số tháng ${formatMonth(filterMonth)}`
+                : `✓ Đã nhập đủ chỉ số cho tất cả ${roomsSorted.length} phòng trong tháng ${formatMonth(filterMonth)}`}
+            </span>
+            {missingRooms.length > 0 && <ChevronRight size={14} style={{ color: T.amberDark, transform: showMissing ? "rotate(90deg)" : "none" }} />}
+          </button>
+          {showMissing && missingRooms.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {missingRooms.map((r) => (
+                <span key={r.id} className="f-mono text-[10px] px-2 py-1 rounded-sm" style={{ background: "rgba(197,90,17,0.1)", color: T.amberDark, border: `1px solid ${T.paperDark}` }}>
+                  {roomLabel(r)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
+        <>
+        <div className="f-body text-xs mb-2" style={{ color: T.inkSoft }}>
+          Hiện {paged.length} / {filtered.length} bản ghi phù hợp{filtered.length > PAGE_SIZE ? ` — trang ${pageClamped}/${totalPages}` : ""}.
+        </div>
         <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
           <table className="w-full text-sm f-body table-lines">
             <thead>
@@ -3786,7 +3876,7 @@ function UtilitiesTab({ perm, user }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => {
+              {paged.map((r, i) => {
                 const room = rooms.find((x) => x.id === r.roomId);
                 if (editingId === r.id) {
                   return (
@@ -3795,7 +3885,16 @@ function UtilitiesTab({ perm, user }) {
                         <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
                         <Field label="Phòng">
                           <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
-                            {rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                            {roomGroups.map((g) => (
+                              <optgroup key={g.building} label={`Toà ${g.building}`}>
+                                {g.rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                              </optgroup>
+                            ))}
+                            {roomsNoBuilding.length > 0 && (
+                              <optgroup label="Chưa rõ toà nhà">
+                                {roomsNoBuilding.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                              </optgroup>
+                            )}
                           </select>
                         </Field>
                         <Field label="Tháng">
@@ -3834,6 +3933,14 @@ function UtilitiesTab({ perm, user }) {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-3 mt-3">
+            <Btn size="sm" variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={pageClamped <= 1}>Trước</Btn>
+            <span className="f-mono text-xs" style={{ color: T.inkSoft }}>Trang {pageClamped} / {totalPages}</span>
+            <Btn size="sm" variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={pageClamped >= totalPages}>Sau</Btn>
+          </div>
+        )}
+        </>
       )}
     </div>
   );
