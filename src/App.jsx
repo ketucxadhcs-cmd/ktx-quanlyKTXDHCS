@@ -2083,8 +2083,19 @@ function RoomsTab({ perm }) {
                                                       <span className="f-mono" style={{ fontSize: 9 }}>{role} (G{bedNo})</span>
                                                     </div>
                                                     <div
-                                                      className="truncate"
-                                                      style={{ color: occByBed ? T.green : T.inkSoft, fontStyle: occByBed ? "normal" : "italic", fontWeight: occByBed ? 600 : 400 }}
+                                                      className="leading-tight"
+                                                      style={{
+                                                        color: occByBed ? T.green : T.inkSoft,
+                                                        fontStyle: occByBed ? "normal" : "italic",
+                                                        fontWeight: occByBed ? 600 : 400,
+                                                        fontSize: 9.5,
+                                                        whiteSpace: "normal",
+                                                        overflowWrap: "break-word",
+                                                        display: "-webkit-box",
+                                                        WebkitLineClamp: 2,
+                                                        WebkitBoxOrient: "vertical",
+                                                        overflow: "hidden",
+                                                      }}
                                                     >
                                                       {occByBed ? occByBed.name : "Trống"}
                                                     </div>
