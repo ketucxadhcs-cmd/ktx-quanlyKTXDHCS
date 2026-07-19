@@ -3705,6 +3705,56 @@ function UtilitiesTab({ perm, user }) {
 
   const months = [...new Set(records.map((r) => r.month))].sort().reverse();
   const q = search.trim().toLowerCase();
+
+  // Gom Toà nhà -> Tầng/khu vực -> Phòng, giống hệt cách hiển thị ở tab Danh sách phòng — để khi ~1000 phòng
+  // vẫn cuộn ngang theo tầng, cuộn dọc riêng từng tầng, dễ rà soát thay vì 1 bảng dài vô tận.
+  const UNKNOWN_BUILDING = "Chưa rõ toà nhà";
+  const UNKNOWN_AREA = "Chưa rõ tầng/khu vực";
+  const gridRooms = roomsSorted.filter((r) => {
+    if (filterBuilding && r.building !== filterBuilding) return false;
+    if (filterArea && r.area !== filterArea) return false;
+    if (q) {
+      const hay = [roomLabel(r), r.building, r.area].join(" ").toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const groupedByBuilding = gridRooms.reduce((acc, r) => {
+    const k = r.building || UNKNOWN_BUILDING;
+    (acc[k] = acc[k] || []).push(r);
+    return acc;
+  }, {});
+  const buildingKeysGrid = Object.keys(groupedByBuilding).sort((a, b) => {
+    if (a === UNKNOWN_BUILDING) return 1;
+    if (b === UNKNOWN_BUILDING) return -1;
+    return naturalCompare(a, b);
+  });
+  const groupByAreaGrid = (list) => {
+    const g = list.reduce((acc, r) => {
+      const k = r.area || UNKNOWN_AREA;
+      (acc[k] = acc[k] || []).push(r);
+      return acc;
+    }, {});
+    return Object.entries(g)
+      .sort(([a], [b]) => {
+        if (a === UNKNOWN_AREA) return 1;
+        if (b === UNKNOWN_AREA) return -1;
+        return naturalCompare(a, b);
+      })
+      .map(([area, list2]) => [area, [...list2].sort((x, y) => naturalCompare(String(x.roomNumber || ""), String(y.roomNumber || "")))]);
+  };
+  // Lấy đúng bản ghi điện/nước cần hiện cho 1 phòng: nếu đang lọc theo 1 tháng cụ thể thì lấy bản ghi tháng đó,
+  // còn nếu không thì lấy bản ghi mới nhất của phòng — kèm mức tiêu thụ đã tính sẵn (elecUsage/waterUsage).
+  const recordForRoom = (roomId) => {
+    const recs = withUsage.filter((r) => String(r.roomId) === String(roomId));
+    if (filterMonth) return recs.find((r) => r.month === filterMonth) || null;
+    return recs.sort((a, b) => String(b.month).localeCompare(String(a.month)))[0] || null;
+  };
+  const quickAdd = (room) => {
+    setForm({ ...blank, roomId: room.id, month: filterMonth || blank.month });
+    setShowForm(true);
+  };
+
   const filtered = withUsage
     .filter((r) => {
       const room = rooms.find((x) => x.id === r.roomId);
@@ -3857,7 +3907,108 @@ function UtilitiesTab({ perm, user }) {
         </div>
       )}
 
-      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
+      {loading ? <LoadingRow /> : filterMonth ? (
+        gridRooms.length === 0 ? <EmptyState text="Không có phòng nào phù hợp với bộ lọc." /> : (
+        <div className="space-y-4">
+          {editingId && (
+            <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
+              <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
+              <Field label="Phòng">
+                <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
+                  {roomGroups.map((g) => (
+                    <optgroup key={g.building} label={`Toà ${g.building}`}>
+                      {g.rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                    </optgroup>
+                  ))}
+                  {roomsNoBuilding.length > 0 && (
+                    <optgroup label="Chưa rõ toà nhà">
+                      {roomsNoBuilding.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </Field>
+              <Field label="Tháng">
+                <input type="month" className={inputCls} style={inputStyle} value={editForm.month} onChange={(e) => setEditForm({ ...editForm, month: e.target.value })} />
+              </Field>
+              <Field label="Chỉ số điện (kWh)">
+                <input type="number" className={inputCls} style={inputStyle} value={editForm.electricityIndex} onChange={(e) => setEditForm({ ...editForm, electricityIndex: e.target.value })} />
+              </Field>
+              <Field label="Chỉ số nước (m³)">
+                <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
+              </Field>
+              <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
+            </div>
+          )}
+          {buildingKeysGrid.map((building) => {
+            const list = groupedByBuilding[building];
+            const areaGroups = groupByAreaGrid(list);
+            return (
+              <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
+                <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
+                  <Building2 size={14} style={{ color: T.amber }} />
+                  <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
+                  <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} phòng)</span>
+                </div>
+                <div className="p-2.5">
+                  <div className="overflow-x-auto pb-1.5 scrollbar-thin">
+                    <div className="flex items-start gap-0" style={{ width: "max-content" }}>
+                      {areaGroups.map(([area, areaList], areaIdx) => (
+                        <div
+                          key={area}
+                          className="flex-shrink-0"
+                          style={{ width: 208, paddingLeft: areaIdx > 0 ? 14 : 0, marginLeft: areaIdx > 0 ? 14 : 0, borderLeft: areaIdx > 0 ? `2px dashed ${T.paperDark}` : "none" }}
+                        >
+                          {areaGroups.length > 1 && (
+                            <div
+                              className="f-display text-[13px] font-bold uppercase tracking-wider mb-2 px-2.5 py-1.5 text-center rounded-sm"
+                              style={{ color: T.paper, background: T.green, boxShadow: `inset 0 0 0 1px ${T.gold}` }}
+                            >
+                              {area}
+                            </div>
+                          )}
+                          <div className="flex flex-col gap-2 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: 236 }}>
+                            {areaList.map((r) => {
+                              const rec = recordForRoom(r.id);
+                              return (
+                                <div key={r.id} className="stamp-border card-item p-3" style={{ background: rec ? "#fff" : "rgba(197,90,17,0.05)" }}>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="f-display text-base font-semibold" style={{ color: T.green }}>Phòng {r.roomNumber}</div>
+                                    {perm.canMaintain && (
+                                      <button onClick={() => (rec ? startEdit(rec) : quickAdd(r))} title={rec ? "Sửa" : "Nhập chỉ số"}>
+                                        <Pencil size={13} style={{ color: T.green }} />
+                                      </button>
+                                    )}
+                                  </div>
+                                  {rec ? (
+                                    <div className="f-body text-xs mt-2 space-y-0.5" style={{ color: T.ink }}>
+                                      <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
+                                      <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => perm.canMaintain && quickAdd(r)}
+                                      className="f-body text-xs mt-2 italic underline underline-offset-2"
+                                      style={{ color: T.amberDark }}
+                                    >
+                                      Chưa nhập chỉ số — {perm.canMaintain ? "bấm để nhập" : "chờ cập nhật"}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        )
+      ) : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
         <>
         <div className="f-body text-xs mb-2" style={{ color: T.inkSoft }}>
           Hiện {paged.length} / {filtered.length} bản ghi phù hợp{filtered.length > PAGE_SIZE ? ` — trang ${pageClamped}/${totalPages}` : ""}.
