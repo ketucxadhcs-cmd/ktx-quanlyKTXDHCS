@@ -38,35 +38,15 @@ function withSelect(style, selected) {
 }
 
 const KTX_PASSWORD_DEFAULT = "KTXCSND"; // Mật khẩu chung mặc định — đổi được ở mục "Đổi mật khẩu"
-const MANAGER_PASSWORD_DEFAULT = "KTXCANBO"; // Mật khẩu quản lý ký túc xá mặc định — đổi được ở mục "Đổi mật khẩu"
 const ADMIN_PASSWORD_DEFAULT = "KTXADMIN"; // Mật khẩu quản trị mặc định — đổi được ở mục "Đổi mật khẩu"
 const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký túc xá (không lẫn dữ liệu khác)
 
 /* ============ PHÂN QUYỀN ============
    admin  : đăng nhập bằng ADMIN_PASSWORD — toàn quyền, kể cả gán quyền cho người khác
-   can_bo : đăng nhập bằng MANAGER_PASSWORD (mật khẩu quản lý ký túc xá) — quyền quản lý phòng ở, sinh viên,
-            tài sản, cập nhật bảo trì (Ban quản lý / Cán bộ quản lý ký túc xá); hoặc được quản trị gán riêng
-            qua mục Phân quyền cho một tên cụ thể khi đăng nhập bằng mật khẩu chung
+   can_bo : được quản trị gán — quyền quản lý phòng ở, sinh viên, tài sản, cập nhật bảo trì (Ban quản lý / Kỹ thuật KTX)
    sinh_vien: mặc định — chỉ được gửi yêu cầu bảo trì và xem thông tin, tự xoá yêu cầu do chính mình gửi
 */
 const normalizeName = (n) => (n || "").trim().toLowerCase();
-
-// Đối chiếu 2 bản ghi sinh viên có phải cùng một người hay không, dùng khi nhập danh sách hàng loạt để
-// tránh thêm trùng: nếu có Mã số SV thì so trực tiếp mã số; nếu không có mã số, phải trùng HOÀN TOÀN
-// họ và tên rồi mới đối chiếu thêm năm sinh, lớp, khoá, đơn vị tuyển sinh — trùng hết các mục này mới
-// coi là cùng một sinh viên (họ tên trùng nhưng năm sinh/lớp/khoá khác nhau vẫn được coi là 2 người khác nhau).
-function isSameStudentRecord(a, b) {
-  const msvA = normalizeName(a?.msv), msvB = normalizeName(b?.msv);
-  if (msvA && msvB) return msvA === msvB;
-  if (normalizeName(a?.name) !== normalizeName(b?.name)) return false;
-  const yearOf = (dob) => String(dob || "").slice(0, 4);
-  return (
-    yearOf(a?.dob) === yearOf(b?.dob) &&
-    normalizeName(a?.lop) === normalizeName(b?.lop) &&
-    normalizeName(a?.khoa) === normalizeName(b?.khoa) &&
-    normalizeName(a?.donViTuyenSinh) === normalizeName(b?.donViTuyenSinh)
-  );
-}
 
 // Tải file thật sự về máy (giống Zalo/Messenger) thay vì chỉ mở tab mới xem ảnh.
 function forceDownload(url, filename) {
@@ -254,20 +234,9 @@ async function downloadFileFromUrl(url, filename) {
   }
 }
 function reportGlobalError(message) {
-  const entry = { id: Date.now() + Math.random(), message, kind: "error" };
+  const entry = { id: Date.now() + Math.random(), message };
   _globalErrors = [..._globalErrors, entry].slice(-4);
   _errorListeners.forEach((fn) => fn(_globalErrors));
-}
-// Thông báo "thành công" (VD: nhập xong bao nhiêu sinh viên mới) — dùng chung khung banner với báo lỗi,
-// nhưng màu xanh và tự biến mất sau vài giây, không cần người dùng bấm đóng tay.
-function reportGlobalNotice(message) {
-  const entry = { id: Date.now() + Math.random(), message, kind: "success" };
-  _globalErrors = [..._globalErrors, entry].slice(-4);
-  _errorListeners.forEach((fn) => fn(_globalErrors));
-  setTimeout(() => {
-    _globalErrors = _globalErrors.filter((e) => e.id !== entry.id);
-    _errorListeners.forEach((fn) => fn(_globalErrors));
-  }, 6000);
 }
 function useGlobalErrors() {
   const [errors, setErrors] = useState(_globalErrors);
@@ -290,9 +259,9 @@ function ErrorBanner() {
         <div
           key={e.id}
           className="f-body text-xs px-4 py-3 flex items-start justify-between gap-3"
-          style={{ background: e.kind === "success" ? T.green : T.red, color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+          style={{ background: T.red, color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
         >
-          <span className="flex-1">{e.kind === "success" ? e.message : (<><b>Lỗi kết nối dữ liệu:</b> {e.message}</>)}</span>
+          <span className="flex-1"><b>Lỗi kết nối dữ liệu:</b> {e.message}</span>
           <button onClick={() => dismiss(e.id)} style={{ color: "#fff" }} aria-label="Đóng"><X size={15} /></button>
         </div>
       ))}
@@ -394,7 +363,7 @@ function useSingleDoc(key, defaultValue) {
 }
 
 function useAuthConfig() {
-  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, managerPassword: MANAGER_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
+  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -407,7 +376,6 @@ function useAuthConfig() {
             const parsed = JSON.parse(snap.data().value);
             setConfigState({
               unitPassword: parsed.unitPassword || KTX_PASSWORD_DEFAULT,
-              managerPassword: parsed.managerPassword || MANAGER_PASSWORD_DEFAULT,
               adminPassword: parsed.adminPassword || ADMIN_PASSWORD_DEFAULT,
             });
           } catch (e) {
@@ -436,12 +404,12 @@ function useAuthConfig() {
 }
 
 /* ============ PHÂN QUYỀN THEO NGƯỜI DÙNG ============ */
-function useRole(user, forcedLoginRole) {
+function useRole(user, isAdminLogin) {
   const { items: permissions, setItems: setPermissions, loading: permLoading } = useSharedList("permissions");
   const explicit = permissions.find((p) => normalizeName(p.name) === normalizeName(user));
 
   let role = "sinh_vien";
-  if (forcedLoginRole) role = forcedLoginRole;
+  if (isAdminLogin) role = "admin";
   else if (explicit) role = explicit.role;
 
   const canManage = role === "admin" || role === "can_bo";
@@ -643,18 +611,14 @@ function LoginGate({ onLogin }) {
       return;
     }
     if (pw === config.adminPassword) {
-      onLogin(name.trim(), "admin");
-      return;
-    }
-    if (pw === config.managerPassword) {
-      onLogin(name.trim(), "can_bo");
+      onLogin(name.trim(), true);
       return;
     }
     if (pw !== config.unitPassword) {
       setErr("Mật khẩu không đúng. Liên hệ Ban quản lý ký túc xá để lấy mật khẩu.");
       return;
     }
-    onLogin(name.trim(), null);
+    onLogin(name.trim(), false);
   };
 
   return (
@@ -990,27 +954,13 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
 
   const previewRows = srcMode === "file" ? mappedFileRows : (ocrRows || []);
   const [selectedRows, setSelectedRows] = useState({});
-  const isDup = (r) => existingItems.some((s) => isSameStudentRecord(r, s));
-  // Dò xem 1 chuỗi có "giống tên người" hay không — để loại các dòng rác lẫn vào cột Họ và tên khi đọc
-  // file/ảnh (VD: tiêu đề trang, ghi chú ngày tháng, dòng tiêu đề bị lặp lại...) ra khỏi việc tick chọn hàng loạt.
-  const looksLikePersonName = (name) => {
-    const s = String(name || "").trim();
-    if (!s) return false;
-    if (/[()[\]{}:;.,]/.test(s)) return false; // tên người không chứa ngoặc, dấu hai chấm, dấu phẩy…
-    if (/\d/.test(s)) return false; // không chứa chữ số
-    if (s.length > 40) return false; // tên người Việt hiếm khi dài hơn 40 ký tự
-    const words = s.split(/\s+/).filter(Boolean);
-    if (words.length < 2 || words.length > 6) return false; // họ tên tiếng Việt thường 2–6 từ
-    const bannedPhrases = /danh\s*sách|cập\s*nhật|trang\s*web|blog|cán\s*bộ|đảng\s*viên|họ\s*và\s*tên|họ\s*tên|ghi\s*chú|biểu\s*mẫu|báo\s*cáo|thống\s*kê|hướng\s*dẫn|quy\s*định|thông\s*báo|danh\s*mục/i;
-    if (bannedPhrases.test(s)) return false; // loại các cụm từ khoá thường gặp trong tiêu đề/mô tả
-    // Không bắt buộc viết hoa từng chữ cái đầu — dữ liệu từ file/OCR có thể viết hoa/thường lẫn lộn
-    // (VD: "Nguyễn minh thuận" vẫn là tên thật), chỉ cần không chứa ký tự lạ và số từ hợp lý là đủ.
-    return /^[a-zA-ZÀ-ỹà-ỹ\s]+$/.test(s);
-  };
+  const existingMsvSet = new Set(existingItems.map((m) => normalizeName(m.msv)).filter(Boolean));
+  const existingNameSet = new Set(existingItems.map((m) => normalizeName(m.name)));
+  const isDup = (r) => (r.msv && existingMsvSet.has(normalizeName(r.msv))) || (!r.msv && r.name && existingNameSet.has(normalizeName(r.name)));
 
   useEffect(() => {
     const next = {};
-    previewRows.forEach((r, i) => { next[i] = Boolean(r.name) && looksLikePersonName(r.name) && !isDup(r); });
+    previewRows.forEach((r, i) => { next[i] = Boolean(r.name) && !isDup(r); });
     setSelectedRows(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mappedFileRows.length, ocrRows]);
@@ -1030,12 +980,12 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
     (!qKhoa || (r.khoa || "").trim() === qKhoa) &&
     (!qLop || (r.lop || "").trim() === qLop) &&
     (!qNamHoc || (r.namHoc || "").trim() === qNamHoc);
-  const quickMatchCount = previewRows.filter((r) => r.name && looksLikePersonName(r.name) && matchesQuick(r)).length;
-  const selectAllRows = () => setSelectedRows(previewRows.reduce((acc, r, i) => { acc[i] = Boolean(r.name) && looksLikePersonName(r.name); return acc; }, {}));
+  const quickMatchCount = previewRows.filter((r) => r.name && matchesQuick(r)).length;
+  const selectAllRows = () => setSelectedRows(previewRows.reduce((acc, r, i) => { acc[i] = Boolean(r.name); return acc; }, {}));
   const clearAllRows = () => setSelectedRows({});
   const selectByQuick = () => setSelectedRows((s) => {
     const next = { ...s };
-    previewRows.forEach((r, i) => { if (r.name && looksLikePersonName(r.name) && matchesQuick(r)) next[i] = true; });
+    previewRows.forEach((r, i) => { if (r.name && matchesQuick(r)) next[i] = true; });
     return next;
   });
   const deselectByQuick = () => setSelectedRows((s) => {
@@ -1047,20 +997,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
   const confirmImport = () => {
     const chosen = previewRows.filter((r, i) => selectedRows[i] && r.name);
     if (chosen.length === 0) return;
-    // Đối chiếu lần cuối trước khi lưu: bỏ qua sinh viên đã có sẵn trong danh sách hiện tại, và cũng
-    // bỏ qua trùng lặp ngay trong chính đợt đang nhập (VD: cùng 1 người xuất hiện 2 dòng trong file).
-    const toAdd = [];
-    let skippedCount = 0;
-    chosen.forEach((r) => {
-      const isDuplicate = existingItems.some((s) => isSameStudentRecord(r, s)) || toAdd.some((s) => isSameStudentRecord(r, s));
-      if (isDuplicate) { skippedCount++; return; }
-      toAdd.push(r);
-    });
-    if (toAdd.length === 0) {
-      reportGlobalNotice(`Không có sinh viên mới nào được thêm — cả ${skippedCount} sinh viên đã chọn đều đã có sẵn trong danh sách.`);
-      return;
-    }
-    onConfirm(toAdd.map((r, idx) => ({
+    onConfirm(chosen.map((r, idx) => ({
       id: Date.now() + idx,
       stt: r.stt || "",
       msv: r.msv || "",
@@ -1076,7 +1013,6 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
       status: "Chưa xếp phòng",
       note: r.roomNumber ? `Ghi chú số phòng khi nhập: ${r.roomNumber}` : "",
     })));
-    reportGlobalNotice(`Đã thêm mới ${toAdd.length} sinh viên.${skippedCount > 0 ? ` Bỏ qua ${skippedCount} sinh viên đã có sẵn trong danh sách.` : ""}`);
   };
 
   return (
@@ -1252,7 +1188,6 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
                         <td className="px-2 py-1.5 f-mono">{r.msv || "—"}</td>
                         <td className="px-2 py-1.5 font-medium">
                           {r.name || <span className="italic" style={{ color: T.inkSoft }}>(thiếu tên — sẽ bị bỏ qua)</span>}
-                          {r.name && !looksLikePersonName(r.name) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.amberDark }}>· Không giống tên người</span>}
                           {isDup(r) && <span className="ml-1.5 f-mono text-[9.5px]" style={{ color: T.red }}>· Trùng đã có</span>}
                         </td>
                         <td className="px-2 py-1.5">{r.gender || "—"}</td>
@@ -1294,14 +1229,7 @@ function DashboardTab({ perm, onNavigate }) {
 
   // Chỉ cho bấm/xem mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
   const isAllowed = (tabId) => (TAB_ROLES[tabId] || []).includes(perm.role);
-  // Học viên chỉ được BẤM VÀO từ Tổng quan để chuyển sang "Quản lý bảo trì" (gửi/theo dõi yêu cầu sửa chữa).
-  // Các thẻ khác (phòng, tài sản...) vẫn hiện số liệu tổng quan nhưng không cho học viên bấm vào để chuyển trang,
-  // dù về mặt TAB_ROLES một số mục (VD: rooms) học viên vẫn có thể xem được ở nơi khác.
-  const goIfAllowed = (tabId) => {
-    if (!onNavigate || !isAllowed(tabId)) return undefined;
-    if (perm.role === "sinh_vien" && tabId !== "maintenance") return undefined;
-    return () => onNavigate(tabId);
-  };
+  const goIfAllowed = (tabId) => (onNavigate && isAllowed(tabId) ? () => onNavigate(tabId) : undefined);
 
   const totalCapacity = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
   const activeStudents = students.filter((s) => s.status !== "Đã trả phòng");
@@ -1365,87 +1293,10 @@ function DashboardTab({ perm, onNavigate }) {
         .sort((a, b) => naturalCompare(a.room.area || "", b.room.area || "") || naturalCompare(String(a.room.roomNumber || ""), String(b.room.roomNumber || "")))
     : [];
 
-  // Vai trò Kỹ thuật chỉ quản lý Bảo trì, nên ở Tổng quan chỉ cho xem đúng khối
-  // "Bảo trì & tài sản" — không hiện số liệu phòng/sinh viên vốn ngoài phạm vi quyền hạn của họ.
-  const isTechOnly = perm.role === "ky_thuat";
-
   return (
     <div>
       <SectionHeader icon={LayoutGrid} eyebrow="Tổng quan" title="Bảng điều khiển ký túc xá" />
-      {loading ? <LoadingRow /> : isTechOnly ? (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} onClick={goIfAllowed("maintenance")} />
-          </div>
-
-          <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
-            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì</div>
-
-            <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
-            <div className="space-y-1">
-              {MAINT_STATUS.map((s) => (
-                <div key={s} className="flex items-center justify-between f-body text-sm">
-                  <span style={{ color: T.ink }}>{s}</span>
-                  <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : s === "Đang xử lý" ? T.amberDark : T.green }}>{maintByStatus[s] || 0}</span>
-                </div>
-              ))}
-              <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
-                <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
-                <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="stamp-border p-4" style={{ background: "#fff" }}>
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div className="f-display text-sm uppercase tracking-wider" style={{ color: T.amberDark }}>Danh mục yêu cầu sửa chữa</div>
-              {isAllowed("maintenance") && onNavigate && (
-                <button onClick={() => onNavigate("maintenance")} className="f-mono text-[11px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.green }}>
-                  Xem tất cả ({maint.length})
-                </button>
-              )}
-            </div>
-            {maint.length === 0 ? <EmptyState text="Chưa có yêu cầu sửa chữa nào." /> : (
-              <div className="overflow-x-auto stamp-border" style={{ background: "#fff" }}>
-                <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
-                  <thead>
-                    <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
-                      <th className="text-center px-3 py-2">Phòng</th>
-                      <th className="text-left px-3 py-2">Nội dung yêu cầu</th>
-                      <th className="text-center px-3 py-2">Trạng thái</th>
-                      <th className="text-center px-3 py-2">Người gửi</th>
-                      <th className="text-center px-3 py-2">Ngày gửi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...maint]
-                      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-                      .slice(0, 8)
-                      .map((m, i) => {
-                        const room = rooms.find((r) => r.id === m.roomId);
-                        const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
-                        return (
-                          <tr
-                            key={m.id}
-                            onClick={goIfAllowed("maintenance")}
-                            className={goIfAllowed("maintenance") ? "cursor-pointer" : ""}
-                            style={{ background: i % 2 ? T.paper : "#fff" }}
-                          >
-                            <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? roomLabel(room) : "Phòng đã xoá"}</td>
-                            <td className="text-left px-3 py-2">{m.title}</td>
-                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: statusColor[m.status] || T.ink }}>{m.status}</td>
-                            <td className="text-center px-3 py-2 f-mono">{m.reporterName || "—"}</td>
-                            <td className="text-center px-3 py-2 f-mono text-[11px]" style={{ color: T.inkSoft }}>{m.createdAt ? formatDateTime(m.createdAt) : "—"}</td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
+      {loading ? <LoadingRow /> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {isAllowed("students") && <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} onClick={goIfAllowed("students")} />}
@@ -1869,7 +1720,6 @@ function RoomsTab({ perm }) {
   const [mergeFrom, setMergeFrom] = useState(null);
   const [mergeTarget, setMergeTarget] = useState("");
   const [mergeReason, setMergeReason] = useState("");
-  const [mergeSelected, setMergeSelected] = useState(new Set());
   const [maintTarget, setMaintTarget] = useState(null); // Phòng đang có SV ở, đang chờ xác nhận lý do trước khi đánh dấu bảo trì
   const [maintReason, setMaintReason] = useState("");
   const [maintNote, setMaintNote] = useState("");
@@ -1975,38 +1825,12 @@ function RoomsTab({ perm }) {
     setRenamingBuilding(null);
   };
 
-  // Mở hộp dồn phòng: mặc định tick sẵn toàn bộ sinh viên trong phòng (giữ hành vi cũ), nhưng cho phép
-  // bỏ tick bớt để chỉ chuyển một phần, thuận tiện khi không cần dồn hết cả phòng.
-  const openMerge = (r) => {
-    setMergeFrom(r);
-    setMergeTarget("");
-    setMergeReason("");
-    setMergeSelected(new Set(occupantsOf(r.id).map((s) => s.id)));
-  };
-  const closeMerge = () => {
-    setMergeFrom(null);
-    setMergeTarget("");
-    setMergeReason("");
-    setMergeSelected(new Set());
-  };
-  const toggleMergeSelect = (id) => {
-    setMergeSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const toggleMergeSelectAll = (allIds) => {
-    setMergeSelected((prev) => (prev.size === allIds.length ? new Set() : new Set(allIds)));
-  };
-
   const doMerge = async () => {
     if (!mergeFrom || !mergeTarget) return;
     if (!mergeReason) { reportGlobalError("Vui lòng chọn lý do dồn phòng trước khi xác nhận."); return; }
     const target = rooms.find((r) => r.id === Number(mergeTarget));
     if (!target) return;
-    const moving = occupantsOf(mergeFrom.id).filter((s) => mergeSelected.has(s.id));
-    if (moving.length === 0) { reportGlobalError("Vui lòng chọn ít nhất một sinh viên để chuyển phòng."); return; }
+    const moving = occupantsOf(mergeFrom.id);
     const already = occupantsOf(target.id).length;
     const room = target.capacity ? Number(target.capacity) : Infinity;
     if (already + moving.length > room) {
@@ -2016,12 +1840,10 @@ function RoomsTab({ perm }) {
     const movingIds = new Set(moving.map((s) => s.id));
     const reasonNote = `Dồn phòng ngày ${new Date().toLocaleDateString("vi-VN")} từ ${roomLabel(mergeFrom)} — Lý do: ${mergeReason}`;
     await setStudents(students.map((s) => (movingIds.has(s.id) ? { ...s, roomId: target.id, bed: "", note: s.note ? `${s.note} | ${reasonNote}` : reasonNote } : s)));
-    // Phòng gốc chỉ chuyển về Trống nếu đã chuyển hết toàn bộ sinh viên đang ở — nếu chỉ dồn một phần thì vẫn còn người ở, giữ nguyên trạng thái.
-    const stillOccupied = occupantsOf(mergeFrom.id).length > moving.length;
-    if (!stillOccupied) {
-      await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống", maintenanceReason: "", maintenanceNote: "" } : r)));
-    }
-    closeMerge();
+    await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống", maintenanceReason: "", maintenanceNote: "" } : r)));
+    setMergeFrom(null);
+    setMergeTarget("");
+    setMergeReason("");
   };
 
   const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
@@ -2363,7 +2185,7 @@ function RoomsTab({ perm }) {
                                     <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
                                   )}
                                   {occ.length > 0 && (
-                                    <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => openMerge(r)}>Dồn phòng…</button>
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => { setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng…</button>
                                   )}
                                 </div>
                               )}
@@ -2383,36 +2205,14 @@ function RoomsTab({ perm }) {
       )}
 
       {mergeFrom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={closeMerge}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => { setMergeFrom(null); setMergeReason(""); }}>
           <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
             <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
               Dồn phòng {roomLabel(mergeFrom)}
             </div>
             <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
-              Chọn sinh viên cần chuyển sang phòng đích bên dưới (mặc định chọn sẵn toàn bộ, có thể bỏ tick bớt nếu không cần chuyển hết). Nếu chuyển hết toàn bộ, phòng gốc sẽ chuyển về trạng thái Trống; nếu chỉ chuyển một phần, phòng gốc giữ nguyên trạng thái.
+              Toàn bộ {occupantsOf(mergeFrom.id).length} sinh viên đang ở phòng này sẽ được chuyển sang phòng đích bên dưới; phòng gốc sẽ chuyển về trạng thái Trống.
             </p>
-            {(() => {
-              const occ = occupantsOf(mergeFrom.id);
-              const allIds = occ.map((s) => s.id);
-              const allSelected = occ.length > 0 && mergeSelected.size === occ.length;
-              return (
-                <div className="mb-3">
-                  <label className="flex items-center gap-2 f-body text-xs font-medium pb-1.5 mb-1.5 cursor-pointer" style={{ color: T.ink, borderBottom: `1px dashed ${T.paperDark}` }}>
-                    <input type="checkbox" checked={allSelected} onChange={() => toggleMergeSelectAll(allIds)} />
-                    Chọn tất cả ({mergeSelected.size}/{occ.length})
-                  </label>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {occ.map((s) => (
-                      <label key={s.id} className="flex items-center gap-2 f-body text-xs cursor-pointer" style={{ color: T.ink }}>
-                        <input type="checkbox" checked={mergeSelected.has(s.id)} onChange={() => toggleMergeSelect(s.id)} />
-                        {s.name}{s.msv ? ` · ${s.msv}` : ""}
-                      </label>
-                    ))}
-                    {occ.length === 0 && <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Phòng này hiện không có sinh viên.</div>}
-                  </div>
-                </div>
-              );
-            })()}
             <Field label="Phòng đích" required>
               <select className={inputCls} style={inputStyle} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
                 <option value="">— Chọn phòng đích —</option>
@@ -2428,8 +2228,8 @@ function RoomsTab({ perm }) {
               </select>
             </Field>
             <div className="flex gap-2 mt-2">
-              <Btn onClick={doMerge} disabled={!mergeTarget || !mergeReason || mergeSelected.size === 0}>Xác nhận dồn phòng ({mergeSelected.size})</Btn>
-              <Btn variant="outline" onClick={closeMerge}>Huỷ</Btn>
+              <Btn onClick={doMerge} disabled={!mergeTarget || !mergeReason}>Xác nhận dồn phòng</Btn>
+              <Btn variant="outline" onClick={() => { setMergeFrom(null); setMergeReason(""); }}>Huỷ</Btn>
             </div>
           </div>
         </div>
@@ -2457,7 +2257,7 @@ function RoomsTab({ perm }) {
             </Field>
             <div className="flex gap-2 mt-2 flex-wrap">
               <Btn onClick={confirmMaintenance} disabled={!maintReason}>Xác nhận đánh dấu bảo trì</Btn>
-              <Btn variant="outline" onClick={() => { const r = maintTarget; setMaintTarget(null); openMerge(r); }}>Dồn phòng cho SV trước</Btn>
+              <Btn variant="outline" onClick={() => { const r = maintTarget; setMaintTarget(null); setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng cho SV trước</Btn>
               <Btn variant="outline" onClick={() => setMaintTarget(null)}>Huỷ</Btn>
             </div>
           </div>
@@ -2735,7 +2535,8 @@ function StudentsTab({ perm, user }) {
           existingItems={students}
           onClose={() => setShowImport(false)}
           onConfirm={async (rows) => {
-            await setStudents([...students, ...rows]);
+            const filtered2 = rows.filter((r) => !students.some((s) => normalizeName(s.msv) === normalizeName(r.msv) && r.msv));
+            await setStudents([...students, ...filtered2]);
             setShowImport(false);
           }}
         />
@@ -2803,7 +2604,6 @@ function StudentsTab({ perm, user }) {
           <table className="w-full f-body table-lines" style={{ fontSize: "12.5px" }}>
             <thead>
               <tr className="f-mono text-[9.5px] uppercase tracking-widest" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
-                <th className="text-center px-2.5 py-2 w-10">STT</th>
                 <th className="text-left px-2.5 py-2">Mã SV</th>
                 <th className="text-left px-2.5 py-2 min-w-[110px]">Họ tên</th>
                 <th className="text-left px-2.5 py-2">Giới tính</th>
@@ -2820,7 +2620,7 @@ function StudentsTab({ perm, user }) {
                 const isEditing = editingId === s.id;
                 if (isEditing) {
                   return (
-                    <tr key={s.id}><td colSpan={9} className="p-2">
+                    <tr key={s.id}><td colSpan={8} className="p-2">
                       <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
                         <Field label="Mã số SV"><input className={inputCls} style={inputStyle} value={editForm.msv} onChange={(e) => setEditForm({ ...editForm, msv: e.target.value })} /></Field>
                         <Field label="Họ và tên"><input className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></Field>
@@ -2848,7 +2648,6 @@ function StudentsTab({ perm, user }) {
                 }
                 return (
                   <tr key={s.id} onClick={() => setSelectedId((id) => (id === s.id ? null : s.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff", borderBottom: `1px solid ${T.paperDark}` }, selectedId === s.id)}>
-                    <td className="px-2.5 py-2 f-mono text-center" style={{ borderRight: `1px solid ${T.paperDark}`, color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-2.5 py-2 f-mono" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.msv || "—"}</td>
                     <td className="px-2.5 py-2 font-bold text-[11px]" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.name}</td>
                     <td className="px-2.5 py-2" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.gender || "—"}</td>
@@ -3165,36 +2964,10 @@ function RosterTab({ perm }) {
   const { items: students, loading } = useSharedList("students");
   const { items: rooms } = useSharedList("rooms");
   const [view, setView] = useState("dang_o"); // dang_o | tra_phong
-  const [filterBuilding, setFilterBuilding] = useState("");
-  const [filterArea, setFilterArea] = useState("");
-  const [filterRoom, setFilterRoom] = useState("");
-  const [filterKhoa, setFilterKhoa] = useState("");
-  const [filterLop, setFilterLop] = useState("");
 
   const dangO = students.filter((s) => s.status !== "Đã trả phòng");
   const traPhong = students.filter((s) => s.status === "Đã trả phòng");
-  const baseList = view === "dang_o" ? dangO : traPhong;
-
-  // Danh mục để lọc nhanh theo Toà/Tầng/Phòng (lấy từ dữ liệu phòng thực tế) và theo Khoá/Lớp (lấy từ
-  // danh sách học viên đang xem — Đang ở nội trú hoặc Đã trả phòng).
-  const buildingOptions = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
-  const areaOptions = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
-  const roomOptions = rooms
-    .filter((r) => !filterBuilding || r.building === filterBuilding)
-    .filter((r) => !filterArea || r.area === filterArea)
-    .sort((a, b) => naturalCompare(a.building || "", b.building || "") || naturalCompare(a.area || "", b.area || "") || naturalCompare(String(a.roomNumber || ""), String(b.roomNumber || "")));
-  const khoaOptions = [...new Set(baseList.map((s) => s.khoa).filter(Boolean))].sort(naturalCompare);
-  const lopOptions = [...new Set(baseList.map((s) => s.lop).filter(Boolean))].sort(naturalCompare);
-
-  const list = baseList.filter((s) => {
-    const room = rooms.find((r) => r.id === s.roomId);
-    if (filterBuilding && room?.building !== filterBuilding) return false;
-    if (filterArea && room?.area !== filterArea) return false;
-    if (filterRoom && String(s.roomId) !== filterRoom) return false;
-    if (filterKhoa && s.khoa !== filterKhoa) return false;
-    if (filterLop && s.lop !== filterLop) return false;
-    return true;
-  });
+  const list = view === "dang_o" ? dangO : traPhong;
 
   const groupCount = (arr, key) => arr.reduce((acc, s) => {
     const k = (s[key] || "").trim() || "Chưa rõ";
@@ -3258,35 +3031,11 @@ function RosterTab({ perm }) {
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-4">
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => { setFilterBuilding(e.target.value); setFilterArea(""); setFilterRoom(""); }}>
-          <option value="">— Tất cả toà nhà —</option>
-          {buildingOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterArea} onChange={(e) => { setFilterArea(e.target.value); setFilterRoom(""); }}>
-          <option value="">— Tất cả tầng/khu vực —</option>
-          {areaOptions.map((a) => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterRoom} onChange={(e) => setFilterRoom(e.target.value)}>
-          <option value="">— Tất cả phòng —</option>
-          {roomOptions.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
-        </select>
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterKhoa} onChange={(e) => setFilterKhoa(e.target.value)}>
-          <option value="">— Tất cả khoá —</option>
-          {khoaOptions.map((k) => <option key={k} value={k}>{k}</option>)}
-        </select>
-        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterLop} onChange={(e) => setFilterLop(e.target.value)}>
-          <option value="">— Tất cả lớp —</option>
-          {lopOptions.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-      </div>
-
-      {loading ? <LoadingRow /> : list.length === 0 ? <EmptyState text="Không có học viên nào phù hợp." /> : (
+      {loading ? <LoadingRow /> : list.length === 0 ? <EmptyState text="Không có học viên nào trong danh sách này." /> : (
         <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
-          <table className="w-full text-sm f-body table-lines table-grid">
+          <table className="w-full text-sm f-body table-lines">
             <thead>
               <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
-                <th className="text-center px-3 py-2 w-12">STT</th>
                 <th className="text-left px-3 py-2">Mã SV</th>
                 <th className="text-left px-3 py-2">Họ tên</th>
                 <th className="text-left px-3 py-2">Khoá/Lớp</th>
@@ -3299,7 +3048,6 @@ function RosterTab({ perm }) {
                 const room = rooms.find((r) => r.id === s.roomId);
                 return (
                   <tr key={s.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                    <td className="px-3 py-2 f-mono text-center" style={{ color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-3 py-2 f-mono">{s.msv || "—"}</td>
                     <td className="px-3 py-2 font-medium">{s.name}</td>
                     <td className="px-3 py-2 f-mono">{s.khoa || "—"} / {s.lop || "—"}</td>
@@ -3614,10 +3362,9 @@ function AssetsTab({ perm, user }) {
 
       {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có tài sản/thiết bị nào phù hợp." /> : (
         <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
-          <table className="w-full text-sm f-body table-lines table-grid">
+          <table className="w-full text-sm f-body table-lines">
             <thead>
               <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
-                <th className="text-center px-3 py-2 w-12">STT</th>
                 <th className="text-left px-3 py-2">Phòng</th>
                 <th className="text-left px-3 py-2">Ảnh</th>
                 <th className="text-left px-3 py-2">Tên thiết bị</th>
@@ -3634,7 +3381,7 @@ function AssetsTab({ perm, user }) {
                 const room = rooms.find((r) => r.id === a.roomId);
                 if (editingId === a.id) {
                   return (
-                    <tr key={a.id}><td colSpan={10} className="p-2">
+                    <tr key={a.id}><td colSpan={9} className="p-2">
                       <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
                         <Field label="Phòng">
                           <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
@@ -3672,7 +3419,6 @@ function AssetsTab({ perm, user }) {
                 }
                 return (
                   <tr key={a.id} onClick={() => setSelectedId((id) => (id === a.id ? null : a.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === a.id)}>
-                    <td className="px-3 py-2 f-mono text-center" style={{ color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "—"}</td>
                     <td className="px-3 py-2">
                       {a.imageUrl ? (
@@ -3708,7 +3454,7 @@ function AssetsTab({ perm, user }) {
                             <button onClick={(e) => { e.stopPropagation(); liquidate(a.id); }} title="Thanh lý tài sản"><AlertTriangle size={13} style={{ color: T.red }} /></button>
                           )}
                           <button onClick={(e) => { e.stopPropagation(); startEdit(a); }} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                          {perm.canManage && <button onClick={(e) => { e.stopPropagation(); remove(a.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
+                          <button onClick={(e) => { e.stopPropagation(); remove(a.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
                         </div>
                       )}
                     </td>
@@ -3730,33 +3476,21 @@ function MaintenanceTab({ perm, user }) {
   const { items: requests, setItems: setRequests, loading } = useSharedList("maintenance");
   const { items: rooms } = useSharedList("rooms");
   const { items: permissions } = useSharedList("permissions");
-  const { items: students } = useSharedList("students");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ roomId: "", title: "", description: "", imageUrl: "" });
   const [warn, setWarn] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [noteDraft, setNoteDraft] = useState({});
   const [assignDraft, setAssignDraft] = useState({});
 
   const technicians = permissions.filter((p) => p.role === "ky_thuat").map((p) => p.name);
 
-  // Xác định phòng của học viên đang đăng nhập (so tên, không phân biệt hoa/thường) để chỉ cho họ
-  // thấy yêu cầu bảo trì của đúng phòng mình đang ở, không thấy yêu cầu của phòng khác — bảo mật thông tin.
-  const myStudent = students.find((s) => perm.isOwner(s.name));
-  const myRoomId = myStudent ? myStudent.roomId : null;
-  // Học viên (không có canMaintain) chỉ được gửi yêu cầu cho ĐÚNG phòng mình đang ở — khoá cứng, không cho
-  // chọn phòng khác qua dropdown như trước (tránh gửi nhầm/gửi hộ phòng không phải của mình).
-  const isStudentRole = perm.role === "sinh_vien";
-
   const submit = async () => {
-    const roomIdToUse = isStudentRole ? myRoomId : form.roomId;
-    if (!roomIdToUse || !form.title.trim()) {
-      setWarn(isStudentRole && !myRoomId ? "Bạn chưa được xếp phòng nên không thể gửi yêu cầu sửa chữa. Vui lòng liên hệ Ban quản lý." : "Vui lòng chọn Phòng và nhập Nội dung yêu cầu trước khi gửi.");
-      return;
-    }
+    if (!form.roomId || !form.title.trim()) { setWarn("Vui lòng chọn Phòng và nhập Nội dung yêu cầu trước khi gửi."); return; }
     setWarn("");
     await setRequests([
-      { id: Date.now(), roomId: Number(roomIdToUse), title: form.title, description: form.description, imageUrl: form.imageUrl, reporterName: user, status: "Chờ xử lý", createdAt: new Date().toISOString(), technicianNote: "", assignedTo: "" },
+      { id: Date.now(), roomId: Number(form.roomId), title: form.title, description: form.description, imageUrl: form.imageUrl, reporterName: user, status: "Chờ xử lý", createdAt: new Date().toISOString(), technicianNote: "", assignedTo: "" },
       ...requests,
     ]);
     setForm({ roomId: "", title: "", description: "", imageUrl: "" });
@@ -3773,44 +3507,23 @@ function MaintenanceTab({ perm, user }) {
     await setRequests(requests.map((r) => (r.id === id ? { ...r, assignedTo: assignDraft[id] ?? r.assignedTo } : r)));
   };
 
-  // Kỹ thuật chỉ được cập nhật trạng thái/ghi chú/phân công, KHÔNG được xoá yêu cầu — chỉ Quản trị/Cán bộ quản lý
-  // (canManage) mới xoá được, hoặc chính học viên gửi yêu cầu tự xoá khi yêu cầu còn đang "Chờ xử lý".
-  const canDelete = (r) => perm.canManage || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
-
-  const visibleByRole = perm.canMaintain
-    ? requests
-    : requests.filter((r) => perm.isOwner(r.reporterName) || (myRoomId != null && String(r.roomId) === String(myRoomId)));
-
+  const canDelete = (r) => perm.canMaintain || perm.isOwner(r.reporterName);
+  const filtered = filterStatus ? requests.filter((r) => r.status === filterStatus) : requests;
   const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
-  // Chia danh sách thành 4 nhóm cố định theo trạng thái (Chờ xử lý → Đang xử lý → Hoàn thành → Từ chối, từ trên xuống),
-  // mỗi nhóm hiển thị khoảng 4 dòng rồi cuộn riêng bên trong nhóm đó — dễ theo dõi tổng quan, không bị lẫn lộn trạng thái.
-  const groupedByStatus = MAINT_STATUS.map((s) => ({ status: s, list: visibleByRole.filter((r) => r.status === s) }));
-  const MAINT_GROUP_MAX_HEIGHT = 560; // chiều cao xấp xỉ 4 thẻ yêu cầu, nhiều hơn thì cuộn dọc
 
   return (
     <div>
-      <SectionHeader compact icon={Wrench} eyebrow={`Tổng số yêu cầu: ${visibleByRole.length}`} title="Quản lý bảo trì"
+      <SectionHeader compact icon={Wrench} eyebrow={`Tổng số yêu cầu: ${requests.length}`} title="Quản lý bảo trì"
         action={<Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi yêu cầu sửa chữa</Btn>} />
 
       {showForm && (
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
           <div className="md:col-span-2"><FormWarning message={warn} /></div>
           <Field label="Phòng" required>
-            {isStudentRole ? (
-              myRoomId != null ? (
-                <div className="f-body text-sm px-3 py-2 rounded-sm" style={{ background: T.paperDark, color: T.ink, border: `1px solid ${T.paperDark}` }}>
-                  {roomLabel(rooms.find((r) => r.id === myRoomId)) || "—"}
-                  <span className="f-mono text-[10px] block mt-0.5" style={{ color: T.inkSoft }}>Chỉ có thể gửi yêu cầu cho đúng phòng bạn đang ở</span>
-                </div>
-              ) : (
-                <div className="f-body text-xs italic" style={{ color: T.red }}>Bạn chưa được xếp phòng nên không thể gửi yêu cầu — vui lòng liên hệ Ban quản lý.</div>
-              )
-            ) : (
-              <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
-                <option value="">— Chọn phòng —</option>
-                {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
-              </select>
-            )}
+            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+              <option value="">— Chọn phòng —</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+            </select>
           </Field>
           <Field label="Nội dung yêu cầu" required><input className={inputCls} style={inputStyle} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="VD: Hỏng bóng đèn, rò rỉ nước…" /></Field>
           <div className="md:col-span-2">
@@ -3822,106 +3535,96 @@ function MaintenanceTab({ perm, user }) {
               {form.imageUrl && <img src={form.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
             </Field>
           </div>
-          <div className="md:col-span-2"><Btn onClick={submit} disabled={isStudentRole && myRoomId == null}>Gửi yêu cầu</Btn></div>
+          <div className="md:col-span-2"><Btn onClick={submit}>Gửi yêu cầu</Btn></div>
         </div>
       )}
 
-      {loading ? <LoadingRow /> : visibleByRole.length === 0 ? <EmptyState text="Chưa có yêu cầu bảo trì nào." /> : (
-        <div className="space-y-4">
-          {groupedByStatus.map(({ status, list }) => (
-            <div key={status}>
-              <div
-                className="f-display text-[11px] font-bold uppercase tracking-wider mb-2 px-3 py-2 rounded-sm flex items-center justify-between"
-                style={{ color: "#fff", background: statusColor[status] || T.green, boxShadow: `inset 0 0 0 1px ${T.gold}` }}
-              >
-                <span>{status} ({list.length})</span>
-              </div>
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">— Tất cả trạng thái —</option>
+          {MAINT_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
 
-              {list.length === 0 ? (
-                <div className="f-body text-xs italic px-1 pb-1" style={{ color: T.inkSoft }}>Không có yêu cầu nào.</div>
-              ) : (
-                <div className="space-y-3 overflow-y-auto scrollbar-thin pr-1" style={{ maxHeight: MAINT_GROUP_MAX_HEIGHT }}>
-                  {list.map((r) => {
-                    const room = rooms.find((x) => x.id === r.roomId);
-                    return (
-                      <div key={r.id} onClick={() => setSelectedId((id) => (id === r.id ? null : r.id))} className="stamp-border p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === r.id)}>
-                        <div className="flex items-start justify-between gap-2 flex-wrap">
-                          <div>
-                            <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{r.title}</div>
-                            <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
-                              {room ? roomLabel(room) : "—"} · Người gửi: {r.reporterName} · {formatDateTime(r.createdAt)}
-                            </div>
-                          </div>
-                          <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status] || T.green, color: "#fff" }}>{r.status}</span>
-                        </div>
-                        {r.description && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{r.description}</div>}
-                        {r.imageUrl && <img src={r.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
-
-                        {perm.canMaintain && (
-                          <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
-                            <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Phân công kỹ thuật:</span>
-                            <input
-                              list="technician-names"
-                              className={inputCls}
-                              style={{ ...inputStyle, fontSize: "12px", width: 200 }}
-                              placeholder="Tên người phụ trách…"
-                              value={assignDraft[r.id] ?? r.assignedTo ?? ""}
-                              onChange={(e) => setAssignDraft((d) => ({ ...d, [r.id]: e.target.value }))}
-                            />
-                            <datalist id="technician-names">
-                              {technicians.map((t) => <option key={t} value={t} />)}
-                            </datalist>
-                            <Btn size="sm" variant="outline" onClick={() => saveAssign(r.id)}>Lưu</Btn>
-                          </div>
-                        )}
-                        {!perm.canMaintain && r.assignedTo && (
-                          <div className="f-body text-xs mt-2" style={{ color: T.inkSoft }}>Phụ trách: <b style={{ color: T.ink }}>{r.assignedTo}</b></div>
-                        )}
-
-                        {perm.canMaintain && (
-                          <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
-                            <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Cập nhật trạng thái:</span>
-                            {MAINT_STATUS.map((s) => (
-                              <button
-                                key={s}
-                                onClick={() => updateStatus(r.id, s)}
-                                className="f-display text-[10px] uppercase tracking-wide px-2 py-1 rounded-sm btn-press"
-                                style={{ background: r.status === s ? (statusColor[s] || T.green) : "transparent", color: r.status === s ? "#fff" : T.green, border: `1px solid ${statusColor[s] || T.green}` }}
-                              >
-                                {s}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        {perm.canMaintain && (
-                          <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              className={inputCls}
-                              style={{ ...inputStyle, fontSize: "12px" }}
-                              placeholder="Ghi chú của bộ phận kỹ thuật…"
-                              value={noteDraft[r.id] ?? r.technicianNote ?? ""}
-                              onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
-                            />
-                            <Btn size="sm" onClick={() => saveNote(r.id)}>Lưu ghi chú</Btn>
-                          </div>
-                        )}
-                        {!perm.canMaintain && r.technicianNote && (
-                          <div className="f-body text-xs mt-2 italic" style={{ color: T.inkSoft }}>Ghi chú kỹ thuật: {r.technicianNote}</div>
-                        )}
-
-                        {canDelete(r) && (
-                          <div className="mt-2 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={() => remove(r.id)} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá yêu cầu</button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+      {loading ? <LoadingRow /> : filtered.length === 0 ? <EmptyState text="Chưa có yêu cầu bảo trì nào." /> : (
+        <div className="space-y-3">
+          {filtered.map((r) => {
+            const room = rooms.find((x) => x.id === r.roomId);
+            return (
+              <div key={r.id} onClick={() => setSelectedId((id) => (id === r.id ? null : r.id))} className="stamp-border p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === r.id)}>
+                <div className="flex items-start justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="f-body text-sm font-semibold" style={{ color: T.ink }}>{r.title}</div>
+                    <div className="f-mono text-[10.5px]" style={{ color: T.inkSoft }}>
+                      {room ? roomLabel(room) : "—"} · Người gửi: {r.reporterName} · {formatDateTime(r.createdAt)}
+                    </div>
+                  </div>
+                  <span className="f-display text-[10px] uppercase tracking-wider px-2 py-1 rounded-sm shrink-0" style={{ background: statusColor[r.status] || T.green, color: "#fff" }}>{r.status}</span>
                 </div>
-              )}
-            </div>
-          ))}
+                {r.description && <div className="f-body text-xs mt-2" style={{ color: T.ink }}>{r.description}</div>}
+                {r.imageUrl && <img src={r.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
+
+                {perm.canMaintain && (
+                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Phân công kỹ thuật:</span>
+                    <input
+                      list="technician-names"
+                      className={inputCls}
+                      style={{ ...inputStyle, fontSize: "12px", width: 200 }}
+                      placeholder="Tên người phụ trách…"
+                      value={assignDraft[r.id] ?? r.assignedTo ?? ""}
+                      onChange={(e) => setAssignDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                    />
+                    <datalist id="technician-names">
+                      {technicians.map((t) => <option key={t} value={t} />)}
+                    </datalist>
+                    <Btn size="sm" variant="outline" onClick={() => saveAssign(r.id)}>Lưu</Btn>
+                  </div>
+                )}
+                {!perm.canMaintain && r.assignedTo && (
+                  <div className="f-body text-xs mt-2" style={{ color: T.inkSoft }}>Phụ trách: <b style={{ color: T.ink }}>{r.assignedTo}</b></div>
+                )}
+
+                {perm.canMaintain && (
+                  <div className="mt-3 pt-3 flex flex-wrap items-center gap-2" style={{ borderTop: `1px dashed ${T.paperDark}` }} onClick={(e) => e.stopPropagation()}>
+                    <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.amberDark }}>Cập nhật trạng thái:</span>
+                    {MAINT_STATUS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => updateStatus(r.id, s)}
+                        className="f-display text-[10px] uppercase tracking-wide px-2 py-1 rounded-sm btn-press"
+                        style={{ background: r.status === s ? (statusColor[s] || T.green) : "transparent", color: r.status === s ? "#fff" : T.green, border: `1px solid ${statusColor[s] || T.green}` }}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {perm.canMaintain && (
+                  <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      className={inputCls}
+                      style={{ ...inputStyle, fontSize: "12px" }}
+                      placeholder="Ghi chú của bộ phận kỹ thuật…"
+                      value={noteDraft[r.id] ?? r.technicianNote ?? ""}
+                      onChange={(e) => setNoteDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                    />
+                    <Btn size="sm" onClick={() => saveNote(r.id)}>Lưu ghi chú</Btn>
+                  </div>
+                )}
+                {!perm.canMaintain && r.technicianNote && (
+                  <div className="f-body text-xs mt-2 italic" style={{ color: T.inkSoft }}>Ghi chú kỹ thuật: {r.technicianNote}</div>
+                )}
+
+                {canDelete(r) && (
+                  <div className="mt-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => remove(r.id)} className="f-mono text-[10px] underline" style={{ color: T.red }}>Xoá yêu cầu</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -3938,7 +3641,7 @@ function UtilitiesTab({ perm, user }) {
   const { value: quota, setValue: setQuota, loading: quotaLoading } = useSingleDoc("utilityQuota", { elecPerPerson: 50, waterPerPerson: 4 });
   const [quotaDraft, setQuotaDraft] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const blank = { roomId: "", month: new Date().toISOString().slice(0, 7), electricityIndex: "", waterIndex: "" };
+  const blank = { roomId: "", month: new Date().toISOString().slice(0, 7), electricityIndex: "", waterIndex: "", occupants: "" };
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
@@ -3951,15 +3654,15 @@ function UtilitiesTab({ perm, user }) {
   const [editForm, setEditForm] = useState(null);
   const [editWarn, setEditWarn] = useState("");
   const [showMissing, setShowMissing] = useState(false);
-  // Bảng nhật ký: mặc định mỗi phòng chỉ hiện bản ghi THÁNG MỚI NHẤT cho gọn — bấm vào tháng để xem lại các tháng đã qua.
-  const [expandedRooms, setExpandedRooms] = useState({});
-  const toggleRoomHistory = (key) => setExpandedRooms((s) => ({ ...s, [key]: !s[key] }));
 
-  // Số người đang thực ở trong từng phòng (để tính định mức điện/nước miễn phí theo đầu người).
+  // Số người đang thực ở trong từng phòng NGAY LÚC NÀY (chỉ dùng làm gợi ý khi nhập bản ghi mới/sửa,
+  // KHÔNG dùng để tính định mức của các bản ghi cũ — vì học viên có thể đã chuyển phòng sau đó).
   const occCountOf = (roomId) => students.filter((s) => String(s.roomId) === String(roomId) && s.status !== "Đã trả phòng").length;
-  // Vượt định mức = mức tiêu thụ thực tế trừ đi định mức miễn phí (định mức/người x số người đang ở) — âm thì coi như 0.
+  // Vượt định mức = mức tiêu thụ thực tế trừ đi định mức miễn phí (định mức/người x số người CỦA CHÍNH
+  // THÁNG ĐÓ, đã chốt sẵn trong bản ghi lúc nhập) — không đổi theo sĩ số hiện tại nếu học viên chuyển phòng sau này.
+  // Bản ghi cũ (nhập trước khi có tính năng này) chưa có occupants thì mới tạm lấy sĩ số hiện tại làm gần đúng.
   const overQuotaOf = (rec, roomId) => {
-    const occ = occCountOf(roomId);
+    const occ = rec.occupants !== undefined && rec.occupants !== null && rec.occupants !== "" ? Number(rec.occupants) : occCountOf(roomId);
     const elecAllow = occ * (Number(quota.elecPerPerson) || 0);
     const waterAllow = occ * (Number(quota.waterPerPerson) || 0);
     return {
@@ -3992,7 +3695,18 @@ function UtilitiesTab({ perm, user }) {
     }
     setWarn("");
     await setRecords([
-      { id: Date.now(), roomId: Number(form.roomId), month: form.month, electricityIndex: Number(form.electricityIndex) || 0, waterIndex: Number(form.waterIndex) || 0, by: user, createdAt: new Date().toISOString() },
+      {
+        id: Date.now(),
+        roomId: Number(form.roomId),
+        month: form.month,
+        electricityIndex: Number(form.electricityIndex) || 0,
+        waterIndex: Number(form.waterIndex) || 0,
+        // Chốt sẵn sĩ số của phòng ngay lúc nhập — để sau này học viên chuyển phòng khác thì định mức
+        // của tháng này vẫn tính đúng theo số người thực ở phòng vào tháng đó, không bị đổi theo.
+        occupants: form.occupants !== "" ? Number(form.occupants) : occCountOf(form.roomId),
+        by: user,
+        createdAt: new Date().toISOString(),
+      },
       ...records,
     ]);
     setForm(blank);
@@ -4000,7 +3714,17 @@ function UtilitiesTab({ perm, user }) {
   };
   const remove = async (id) => setRecords(records.filter((r) => r.id !== id));
 
-  const startEdit = (r) => { setEditingId(r.id); setEditForm({ roomId: r.roomId, month: r.month, electricityIndex: String(r.electricityIndex), waterIndex: String(r.waterIndex) }); setEditWarn(""); };
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setEditForm({
+      roomId: r.roomId,
+      month: r.month,
+      electricityIndex: String(r.electricityIndex),
+      waterIndex: String(r.waterIndex),
+      occupants: r.occupants !== undefined && r.occupants !== null ? String(r.occupants) : String(occCountOf(r.roomId)),
+    });
+    setEditWarn("");
+  };
   const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditWarn(""); };
   const saveEdit = async () => {
     if (!editForm.roomId || !editForm.month) { setEditWarn("Vui lòng chọn đủ Phòng và Tháng."); return; }
@@ -4009,7 +3733,7 @@ function UtilitiesTab({ perm, user }) {
       return;
     }
     await setRecords(records.map((r) => (r.id === editingId
-      ? { ...r, roomId: Number(editForm.roomId), month: editForm.month, electricityIndex: Number(editForm.electricityIndex) || 0, waterIndex: Number(editForm.waterIndex) || 0, editedBy: user, editedAt: new Date().toISOString() }
+      ? { ...r, roomId: Number(editForm.roomId), month: editForm.month, electricityIndex: Number(editForm.electricityIndex) || 0, waterIndex: Number(editForm.waterIndex) || 0, occupants: Number(editForm.occupants) || 0, editedBy: user, editedAt: new Date().toISOString() }
       : r)));
     cancelEdit();
   };
@@ -4022,8 +3746,6 @@ function UtilitiesTab({ perm, user }) {
     const prev = prevRecords[0];
     return {
       ...r,
-      prevElectricityIndex: prev ? prev.electricityIndex : null,
-      prevWaterIndex: prev ? prev.waterIndex : null,
       elecUsage: prev ? r.electricityIndex - prev.electricityIndex : null,
       waterUsage: prev ? r.waterIndex - prev.waterIndex : null,
     };
@@ -4077,7 +3799,7 @@ function UtilitiesTab({ perm, user }) {
     return recs.sort((a, b) => String(b.month).localeCompare(String(a.month)))[0] || null;
   };
   const quickAdd = (room) => {
-    setForm({ ...blank, roomId: room.id, month: filterMonth || blank.month });
+    setForm({ ...blank, roomId: room.id, month: filterMonth || blank.month, occupants: String(occCountOf(room.id)) });
     setShowForm(true);
   };
 
@@ -4184,7 +3906,12 @@ function UtilitiesTab({ perm, user }) {
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
           <div className="md:col-span-2"><FormWarning message={warn} /></div>
           <Field label="Phòng" required>
-            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+            <select
+              className={inputCls}
+              style={inputStyle}
+              value={form.roomId}
+              onChange={(e) => setForm({ ...form, roomId: e.target.value, occupants: e.target.value ? String(occCountOf(e.target.value)) : "" })}
+            >
               <option value="">— Chọn phòng —</option>
               {roomGroups.map((g) => (
                 <optgroup key={g.building} label={`Toà ${g.building}`}>
@@ -4206,6 +3933,9 @@ function UtilitiesTab({ perm, user }) {
           </Field>
           <Field label="Chỉ số nước (m³)" required>
             <input type="number" className={inputCls} style={inputStyle} value={form.waterIndex} onChange={(e) => setForm({ ...form, waterIndex: e.target.value })} />
+          </Field>
+          <Field label="Số người ở phòng (tháng này) — để tính định mức">
+            <input type="number" className={inputCls} style={inputStyle} value={form.occupants} onChange={(e) => setForm({ ...form, occupants: e.target.value })} />
           </Field>
           <div className="md:col-span-2"><Btn onClick={submit}>Lưu chỉ số</Btn></div>
         </div>
@@ -4312,6 +4042,9 @@ function UtilitiesTab({ perm, user }) {
               <Field label="Chỉ số nước (m³)">
                 <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
               </Field>
+              <Field label="Số người ở phòng (tháng này)">
+                <input type="number" className={inputCls} style={inputStyle} value={editForm.occupants} onChange={(e) => setEditForm({ ...editForm, occupants: e.target.value })} />
+              </Field>
               <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
             </div>
           )}
@@ -4357,8 +4090,8 @@ function UtilitiesTab({ perm, user }) {
                                   </div>
                                   {rec ? (
                                     <div className="f-body text-xs mt-2 space-y-0.5" style={{ color: T.ink }}>
-                                      <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.prevElectricityIndex !== null && <span className="f-mono" style={{ color: T.inkSoft }}>/{rec.prevElectricityIndex}</span>}{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
-                                      <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.prevWaterIndex !== null && <span className="f-mono" style={{ color: T.inkSoft }}>/{rec.prevWaterIndex}</span>}{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
+                                      <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
+                                      <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
                                       {(() => {
                                         const over = overQuotaOf(rec, r.id);
                                         if (over.elecOver === null && over.waterOver === null) return null;
@@ -4399,8 +4132,7 @@ function UtilitiesTab({ perm, user }) {
       ) : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
         <div className="space-y-4">
         <div className="f-body text-xs" style={{ color: T.inkSoft }}>
-          Hiện {filtered.length} bản ghi phù hợp, chia theo {logBuildingKeys.length} toà nhà. Mỗi phòng chỉ hiện chỉ số tháng gần nhất — bấm vào ô Tháng để xem lại các tháng đã qua.
-          <span className="italic"> (Ghi chú: cột chỉ số hiển thị dạng <b className="f-mono not-italic">Chỉ số mới/Chỉ số cũ</b>.)</span>
+          Hiện {filtered.length} bản ghi phù hợp, chia theo {logBuildingKeys.length} toà nhà.
         </div>
         {editingId && (
           <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
@@ -4428,32 +4160,20 @@ function UtilitiesTab({ perm, user }) {
             <Field label="Chỉ số nước (m³)">
               <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
             </Field>
+            <Field label="Số người ở phòng (tháng này)">
+              <input type="number" className={inputCls} style={inputStyle} value={editForm.occupants} onChange={(e) => setEditForm({ ...editForm, occupants: e.target.value })} />
+            </Field>
             <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
           </div>
         )}
         {logBuildingKeys.map((building) => {
           const list = logGroups[building];
-          // Gom các bản ghi trong toà theo từng phòng — list đã được sắp theo tháng giảm dần trong cùng 1 phòng,
-          // nên bản ghi đầu tiên của mỗi phòng chính là tháng gần nhất, các bản ghi còn lại là lịch sử tháng cũ.
-          const roomOrder = [];
-          const byRoom = {};
-          list.forEach((r) => {
-            const key = String(r.roomId);
-            if (!byRoom[key]) { byRoom[key] = []; roomOrder.push(key); }
-            byRoom[key].push(r);
-          });
-          const renderIndexCell = (curr, prev) => (
-            <>
-              {curr}
-              {prev !== null && prev !== undefined && <span className="f-mono" style={{ color: T.inkSoft }}>/{prev}</span>}
-            </>
-          );
           return (
             <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
               <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
                 <Building2 size={14} style={{ color: T.amber }} />
                 <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
-                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({roomOrder.length} phòng)</span>
+                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} bản ghi)</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
@@ -4461,9 +4181,9 @@ function UtilitiesTab({ perm, user }) {
                     <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.greenDark || T.green, color: T.paper }}>
                       <th className="text-center px-3 py-2">Phòng</th>
                       <th className="text-center px-3 py-2">Tháng</th>
-                      <th className="text-center px-3 py-2">Chỉ số điện<br /><span className="normal-case font-normal" style={{ opacity: 0.75 }}>(mới/cũ)</span></th>
+                      <th className="text-center px-3 py-2">Chỉ số điện</th>
                       <th className="text-center px-3 py-2">Điện tiêu thụ</th>
-                      <th className="text-center px-3 py-2">Chỉ số nước<br /><span className="normal-case font-normal" style={{ opacity: 0.75 }}>(mới/cũ)</span></th>
+                      <th className="text-center px-3 py-2">Chỉ số nước</th>
                       <th className="text-center px-3 py-2">Nước tiêu thụ</th>
                       <th className="text-center px-3 py-2">Vượt định mức điện</th>
                       <th className="text-center px-3 py-2">Vượt định mức nước</th>
@@ -4471,85 +4191,32 @@ function UtilitiesTab({ perm, user }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {roomOrder.map((key, i) => {
-                      const roomRecords = byRoom[key];
-                      const latest = roomRecords[0];
-                      const history = roomRecords.slice(1);
-                      const room = rooms.find((x) => x.id === latest.roomId);
-                      const over = overQuotaOf(latest, latest.roomId);
-                      const expanded = !!expandedRooms[key];
+                    {list.map((r, i) => {
+                      const room = rooms.find((x) => x.id === r.roomId);
+                      const over = overQuotaOf(r, r.roomId);
                       return (
-                        <React.Fragment key={key}>
-                          <tr style={{ background: i % 2 ? T.paper : "#fff" }}>
-                            <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
-                            <td className="text-center px-3 py-2">
-                              {history.length > 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleRoomHistory(key)}
-                                  className="f-mono inline-flex items-center gap-1 underline underline-offset-2"
-                                  style={{ color: T.green }}
-                                  title="Bấm để xem các tháng đã qua"
-                                >
-                                  {formatMonth(latest.month)}
-                                  <ChevronRight size={11} style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s ease" }} />
-                                </button>
-                              ) : (
-                                <span className="f-mono">{formatMonth(latest.month)}</span>
-                              )}
-                              {history.length > 0 && (
-                                <div className="f-mono text-[9.5px]" style={{ color: T.inkSoft }}>
-                                  {expanded ? "đang hiện" : `+${history.length} tháng trước`}
-                                </div>
-                              )}
-                            </td>
-                            <td className="text-center px-3 py-2 f-mono">{renderIndexCell(latest.electricityIndex, latest.prevElectricityIndex)}</td>
-                            <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{latest.elecUsage === null ? "—" : latest.elecUsage}</td>
-                            <td className="text-center px-3 py-2 f-mono">{renderIndexCell(latest.waterIndex, latest.prevWaterIndex)}</td>
-                            <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{latest.waterUsage === null ? "—" : latest.waterUsage}</td>
-                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.elecOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.elecAllow} kWh (${over.occ} người)`}>
-                              {over.elecOver === null ? "—" : over.elecOver > 0 ? `+${over.elecOver} kWh` : "Trong định mức"}
-                            </td>
-                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.waterOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.waterAllow} m³ (${over.occ} người)`}>
-                              {over.waterOver === null ? "—" : over.waterOver > 0 ? `+${over.waterOver} m³` : "Trong định mức"}
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              {perm.canMaintain && (
-                                <div className="flex items-center justify-center gap-2">
-                                  <button onClick={() => startEdit(latest)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                                  <button onClick={() => remove(latest.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                          {expanded && history.map((r) => {
-                            const hOver = overQuotaOf(r, r.roomId);
-                            return (
-                              <tr key={r.id} style={{ background: T.selectBg, opacity: 0.85 }}>
-                                <td className="text-center px-3 py-2 f-mono text-[11px]" style={{ color: T.inkSoft }}>↳ tháng trước</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px]">{formatMonth(r.month)}</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px]">{renderIndexCell(r.electricityIndex, r.prevElectricityIndex)}</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px]" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px]">{renderIndexCell(r.waterIndex, r.prevWaterIndex)}</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px]" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px] font-semibold" style={{ color: hOver.elecOver > 0 ? T.red : T.green }}>
-                                  {hOver.elecOver === null ? "—" : hOver.elecOver > 0 ? `+${hOver.elecOver} kWh` : "Trong định mức"}
-                                </td>
-                                <td className="text-center px-3 py-2 f-mono text-[12px] font-semibold" style={{ color: hOver.waterOver > 0 ? T.red : T.green }}>
-                                  {hOver.waterOver === null ? "—" : hOver.waterOver > 0 ? `+${hOver.waterOver} m³` : "Trong định mức"}
-                                </td>
-                                <td className="px-3 py-2 text-center">
-                                  {perm.canMaintain && (
-                                    <div className="flex items-center justify-center gap-2">
-                                      <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                                      <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
-                                    </div>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </React.Fragment>
+                        <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                          <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
+                          <td className="text-center px-3 py-2 f-mono">{formatMonth(r.month)}</td>
+                          <td className="text-center px-3 py-2 f-mono">{r.electricityIndex}</td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
+                          <td className="text-center px-3 py-2 f-mono">{r.waterIndex}</td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
+                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.elecOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.elecAllow} kWh (${over.occ} người)`}>
+                            {over.elecOver === null ? "—" : over.elecOver > 0 ? `+${over.elecOver} kWh` : "Trong định mức"}
+                          </td>
+                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.waterOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.waterAllow} m³ (${over.occ} người)`}>
+                            {over.waterOver === null ? "—" : over.waterOver > 0 ? `+${over.waterOver} m³` : "Trong định mức"}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {perm.canMaintain && (
+                              <div className="flex items-center justify-center gap-2">
+                                <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                                <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -4615,32 +4282,12 @@ function DocsTab({ user, perm }) {
               <div className="f-display text-sm uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: T.amberDark }}><ChevronRight size={14} />{subj}</div>
               <div className="space-y-2">
                 {docs.map((d) => (
-                  <div key={d.id} onClick={() => toggleSelect(d.id)} className="flex items-center justify-between p-3 cursor-pointer gap-3" style={withSelect({ background: "#fff" }, selectedId === d.id)}>
-                    <div className="flex items-center gap-3 min-w-0">
-                      {d.url && isImageAttachment({ url: d.url }) && (
-                        <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="Xem ảnh" className="shrink-0">
-                          <img src={d.url} alt={d.title} className="w-14 h-14 object-cover stamp-border" />
-                        </a>
-                      )}
-                      <div className="min-w-0">
-                        <div className="f-body text-sm font-medium" style={{ color: T.ink }}>{d.title}</div>
-                        {d.url && <a href={d.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="f-mono text-xs underline break-all" style={{ color: T.green }}>{d.url}</a>}
-                      </div>
+                  <div key={d.id} onClick={() => toggleSelect(d.id)} className="flex items-center justify-between p-3 cursor-pointer" style={withSelect({ background: "#fff" }, selectedId === d.id)}>
+                    <div>
+                      <div className="f-body text-sm font-medium" style={{ color: T.ink }}>{d.title}</div>
+                      {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="f-mono text-xs underline break-all" style={{ color: T.green }}>{d.url}</a>}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      {d.url && (
-                        <button
-                          type="button"
-                          onClick={() => downloadFileFromUrl(d.url, d.title || `tai-lieu-${d.id}`)}
-                          title="Tải về"
-                          className="flex items-center gap-1 px-2 py-1 rounded-sm f-mono text-[10px] uppercase tracking-wide btn-press"
-                          style={{ border: `1px solid ${T.green}`, color: T.green, background: "transparent" }}
-                        >
-                          <Upload size={12} style={{ transform: "rotate(180deg)" }} /> Tải về
-                        </button>
-                      )}
-                      {(perm.canManage || perm.isOwner(d.by)) && <button onClick={() => remove(d.id)} title="Xoá"><Trash2 size={14} style={{ color: T.red }} /></button>}
-                    </div>
+                    {(perm.canManage || perm.isOwner(d.by)) && <button onClick={() => remove(d.id)}><Trash2 size={14} style={{ color: T.red }} /></button>}
                   </div>
                 ))}
               </div>
@@ -4809,7 +4456,6 @@ function BackupSection() {
 function PasswordTab({ user, perm }) {
   const { config, setConfig, loading } = useAuthConfig();
   const [unitPw, setUnitPw] = useState("");
-  const [managerPw, setManagerPw] = useState("");
   const [adminPw, setAdminPw] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
@@ -4817,28 +4463,14 @@ function PasswordTab({ user, perm }) {
 
   useEffect(() => {
     setUnitPw(config.unitPassword);
-    setManagerPw(config.managerPassword);
     setAdminPw(config.adminPassword);
-  }, [config.unitPassword, config.managerPassword, config.adminPassword]);
+  }, [config.unitPassword, config.adminPassword]);
 
-  // Cán bộ quản lý (can_bo) chỉ được xem/đổi mật khẩu Học viên và mật khẩu Quản lý ký túc xá của chính mình —
-  // KHÔNG được xem hay đổi mật khẩu Quản trị. Chỉ tài khoản Quản trị mới toàn quyền với cả 3 mật khẩu.
   const saveAdmin = async () => {
-    if (!unitPw.trim() || !managerPw.trim() || (perm.isAdmin && !adminPw.trim())) {
-      setWarn(
-        perm.isAdmin
-          ? "Vui lòng nhập đủ cả 3 mật khẩu (Chung ký túc xá, Quản lý ký túc xá, Quản trị) trước khi lưu."
-          : "Vui lòng nhập đủ Mật khẩu chung ký túc xá và Mật khẩu quản lý ký túc xá trước khi lưu."
-      );
-      return;
-    }
+    if (!unitPw.trim() || !adminPw.trim()) { setWarn("Vui lòng nhập đủ cả Mật khẩu chung ký túc xá và Mật khẩu quản trị trước khi lưu."); return; }
     setWarn("");
     setSaving(true);
-    const ok = await setConfig({
-      unitPassword: unitPw.trim(),
-      managerPassword: managerPw.trim(),
-      adminPassword: perm.isAdmin ? adminPw.trim() : config.adminPassword,
-    });
+    const ok = await setConfig({ unitPassword: unitPw.trim(), adminPassword: adminPw.trim() });
     setSaving(false);
     setStatus(ok ? "Đã lưu mật khẩu mới. Áp dụng ngay từ lần đăng nhập tiếp theo." : "Lưu thất bại, thử lại nhé.");
     setTimeout(() => setStatus(""), 4000);
@@ -4850,22 +4482,16 @@ function PasswordTab({ user, perm }) {
       {loading ? <LoadingRow /> : (
         <div className="stamp-border p-4" style={{ background: "#fff" }}>
           <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
-            {perm.isAdmin
-              ? "Bạn là Quản trị — đổi được cả 3 mật khẩu: mật khẩu chung ký túc xá, mật khẩu quản lý ký túc xá và mật khẩu quản trị. Mật khẩu mới áp dụng ngay từ lần đăng nhập tiếp theo của mọi người."
-              : "Bạn là Cán bộ quản lý ký túc xá — đổi được mật khẩu chung ký túc xá (Học viên) và mật khẩu quản lý ký túc xá. Mật khẩu quản trị chỉ Quản trị viên mới xem và đổi được."}
+            Bạn là Quản trị — đổi được mật khẩu chung ký túc xá và mật khẩu quản trị. Mật khẩu mới áp dụng ngay từ lần
+            đăng nhập tiếp theo của mọi người.
           </p>
           <FormWarning message={warn} />
           <Field label="Mật khẩu chung ký túc xá (dùng để đăng nhập thường)" required>
             <PasswordInput value={unitPw} onChange={(e) => setUnitPw(e.target.value)} />
           </Field>
-          <Field label="Mật khẩu quản lý ký túc xá (đăng nhập với quyền Cán bộ quản lý)" required>
-            <PasswordInput value={managerPw} onChange={(e) => setManagerPw(e.target.value)} />
+          <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
+            <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
           </Field>
-          {perm.isAdmin && (
-            <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
-              <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
-            </Field>
-          )}
           <Btn onClick={saveAdmin} disabled={saving}>{saving ? "Đang lưu…" : "Lưu mật khẩu"}</Btn>
           {status && <div className="f-body text-xs mt-3" style={{ color: T.green }}>{status}</div>}
         </div>
@@ -5429,9 +5055,6 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
   const [nameInput, setNameInput] = useState("");
   const [roleInput, setRoleInput] = useState("can_bo");
   const [warn, setWarn] = useState("");
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState(null);
-  const [editWarn, setEditWarn] = useState("");
 
   const grant = async () => {
     const nm = nameInput.trim();
@@ -5445,32 +5068,18 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
   const [selectedId, setSelectedId] = useState(null);
   const toggleSelect = (id) => setSelectedId((s) => (s === id ? null : id));
 
-  const startEdit = (p) => { setEditingId(p.id); setEditForm({ name: p.name, role: p.role }); setEditWarn(""); };
-  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditWarn(""); };
-  const saveEdit = async () => {
-    const nm = (editForm.name || "").trim();
-    if (!nm) { setEditWarn("Vui lòng nhập Họ và tên."); return; }
-    if (permissions.some((p) => p.id !== editingId && normalizeName(p.name) === normalizeName(nm))) {
-      setEditWarn("Đã có người khác được gán quyền với tên này. Hãy gỡ quyền của người trùng tên trước, hoặc nhập tên đầy đủ hơn để phân biệt.");
-      return;
-    }
-    setEditWarn("");
-    await setPermissions(permissions.map((p) => (p.id === editingId ? { ...p, name: nm, role: editForm.role } : p)));
-    cancelEdit();
-  };
-
-  const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
+  const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Tài sản & Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
 
   return (
     <div>
-      <SectionHeader icon={Shield} eyebrow="Quản trị & Cán bộ quản lý" title="Phân quyền người dùng" />
+      <SectionHeader icon={Shield} eyebrow="Chỉ quản trị" title="Phân quyền người dùng" />
 
       <BackupSection />
 
       <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
         <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
           Mặc định, chỉ <b>Quản trị viên</b> và <b>Cán bộ quản lý ký túc xá</b> mới được thêm/xoá/sửa Phòng, Học viên, Bố trí và Phân quyền.
-          Vai trò <b>Kỹ thuật</b> chỉ được quản lý mục Bảo trì (cập nhật trạng thái, ghi chú xử lý).
+          Vai trò <b>Kỹ thuật</b> chỉ được quản lý mục Tài sản - thiết bị và Bảo trì (cập nhật trạng thái, ghi chú xử lý).
           Học viên chỉ gửi được yêu cầu bảo trì và tự xoá yêu cầu do chính mình gửi. Nhập đúng họ tên người đó dùng để đăng nhập, rồi chọn vai trò.
         </p>
         <FormWarning message={warn} />
@@ -5504,37 +5113,11 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
             </thead>
             <tbody>
               {permissions.map((p, i) => (
-                editingId === p.id ? (
-                  <tr key={p.id} style={{ background: T.selectBg, boxShadow: `inset 0 0 0 2px ${T.selectBorder}` }}>
-                    <td className="px-3 py-2" colSpan={3}>
-                      <div className="mb-2"><FormWarning message={editWarn} /></div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                        <Field label="Họ và tên" required>
-                          <input list="student-names" className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-                        </Field>
-                        <Field label="Vai trò">
-                          <select className={inputCls} style={inputStyle} value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
-                            <option value="can_bo">Cán bộ quản lý ký túc xá</option>
-                            <option value="ky_thuat">Kỹ thuật</option>
-                            <option value="sinh_vien">Học viên</option>
-                          </select>
-                        </Field>
-                        <div className="flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={p.id} onClick={() => toggleSelect(p.id)} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === p.id)}>
-                    <td className="px-3 py-2 font-medium">{p.name}</td>
-                    <td className="px-3 py-2">{roleLabel[p.role] || p.role}</td>
-                    <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => startEdit(p)} title="Sửa"><Pencil size={14} style={{ color: T.green }} /></button>
-                        <button onClick={() => revoke(p.id)} title="Gỡ quyền (về Sinh viên mặc định)"><Trash2 size={14} style={{ color: T.red }} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                )
+                <tr key={p.id} onClick={() => toggleSelect(p.id)} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === p.id)}>
+                  <td className="px-3 py-2 font-medium">{p.name}</td>
+                  <td className="px-3 py-2">{roleLabel[p.role] || p.role}</td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => revoke(p.id)} title="Gỡ quyền (về Sinh viên mặc định)"><Trash2 size={14} style={{ color: T.red }} /></button></td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -5560,35 +5143,33 @@ const TABS = [
 ];
 
 // Mỗi mục chỉ hiện với đúng những vai trò được liệt kê ở đây — Học viên (sinh_vien) chỉ thấy
-// những mục dành cho mình (Tổng quan, Quản lý bảo trì để gửi/theo dõi yêu cầu, Thông báo, Tài liệu - Văn bản).
-// Các mục quản lý (danh sách phòng, danh sách sinh viên có thông tin cá nhân, bố trí phòng,
+// những mục dành cho mình (Tổng quan, Danh sách phòng để xem, Quản lý bảo trì để gửi/theo dõi yêu cầu,
+// Thông báo, Tài liệu - Văn bản). Các mục quản lý (danh sách sinh viên có thông tin cá nhân, bố trí phòng,
 // quân số, tài sản, điện - nước, nội vụ phòng) không hiện ra với Học viên, không chỉ là bị khoá nút bấm.
-// Ở Tổng quan, học viên vẫn thấy số liệu tổng hợp về phòng (xem goIfAllowed trong DashboardTab) nhưng
-// không bấm vào được vì không còn trong danh sách vai trò của tab "rooms".
 const TAB_ROLES = {
   home: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  rooms: ["admin", "can_bo"],
+  rooms: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
   students: ["admin", "can_bo"],
   assignment: ["admin", "can_bo"],
   roster: ["admin", "can_bo"],
-  assets: ["admin", "can_bo"],
+  assets: ["admin", "can_bo", "ky_thuat"],
   maintenance: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  utilities: ["admin", "can_bo"],
+  utilities: ["admin", "can_bo", "ky_thuat"],
   inspections: ["admin", "can_bo"],
-  notifications: ["admin", "can_bo", "sinh_vien"],
-  docs: ["admin", "can_bo", "sinh_vien"],
+  notifications: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  docs: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
 };
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [loginRole, setLoginRole] = useState(null);
+  const [isAdminLogin, setIsAdminLogin] = useState(false);
   const [tab, setTab] = useState("home");
   const [navOpen, setNavOpen] = useState(false);
   const { value: managerInfo, setValue: setManagerInfo } = useSingleDoc("managerInfo", { name: "", phone: "" });
   const [editingManager, setEditingManager] = useState(false);
   const [managerForm, setManagerForm] = useState({ name: "", phone: "" });
 
-  const { perm, permissions, setPermissions, permLoading } = useRole(user, loginRole);
+  const { perm, permissions, setPermissions, permLoading } = useRole(user, isAdminLogin);
 
   // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
   // đổi quyền của mình, hoặc Học viên lỡ đứng ở mục không dành cho mình), tự động đưa về Tổng quan.
@@ -5596,14 +5177,13 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const allowed = tab === "reports" ? perm.canManage
-      : tab === "password" ? perm.canManage
-      : tab === "permissions" ? perm.canManage
+      : (tab === "password" || tab === "permissions") ? perm.isAdmin
       : (TAB_ROLES[tab] || []).includes(perm.role);
     if (!allowed) setTab("home");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perm.role, user]);
 
-  if (!user) return <LoginGate onLogin={(name, role) => { setUser(name); setLoginRole(role); }} />;
+  if (!user) return <LoginGate onLogin={(name, admin) => { setUser(name); setIsAdminLogin(!!admin); }} />;
 
   const roleBadge = { admin: "Quản trị", can_bo: "Cán bộ quản lý", ky_thuat: "Kỹ thuật", sinh_vien: "Học viên" };
   const canEditManager = perm.canManage;
@@ -5616,7 +5196,7 @@ export default function App() {
   const renderTab = () => {
     const isReportsOrAdminTab = tab === "reports" || tab === "password" || tab === "permissions";
     const allowedForTab = isReportsOrAdminTab
-      ? perm.canManage
+      ? (tab === "reports" ? perm.canManage : perm.isAdmin)
       : (TAB_ROLES[tab] || []).includes(perm.role);
     if (!allowedForTab) return <DashboardTab perm={perm} onNavigate={goToTab} />;
     switch (tab) {
@@ -5641,8 +5221,8 @@ export default function App() {
   const visibleTabs = [
     ...TABS.filter((t) => (TAB_ROLES[t.id] || []).includes(perm.role)),
     ...(perm.canManage ? [{ id: "reports", label: "Báo cáo - Thống kê", icon: ClipboardCheck }] : []),
-    ...(perm.canManage ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
-    ...(perm.canManage ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
+    ...(perm.isAdmin ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
+    ...(perm.isAdmin ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
   ];
   const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
   const RoleIcon = roleIcon[perm.role] || Users;
