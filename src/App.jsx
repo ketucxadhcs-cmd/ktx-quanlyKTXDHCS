@@ -2803,6 +2803,7 @@ function StudentsTab({ perm, user }) {
           <table className="w-full f-body table-lines" style={{ fontSize: "12.5px" }}>
             <thead>
               <tr className="f-mono text-[9.5px] uppercase tracking-widest" style={{ background: T.green, color: T.paper, position: "sticky", top: 0, zIndex: 1 }}>
+                <th className="text-center px-2.5 py-2 w-10">STT</th>
                 <th className="text-left px-2.5 py-2">Mã SV</th>
                 <th className="text-left px-2.5 py-2 min-w-[110px]">Họ tên</th>
                 <th className="text-left px-2.5 py-2">Giới tính</th>
@@ -2819,7 +2820,7 @@ function StudentsTab({ perm, user }) {
                 const isEditing = editingId === s.id;
                 if (isEditing) {
                   return (
-                    <tr key={s.id}><td colSpan={8} className="p-2">
+                    <tr key={s.id}><td colSpan={9} className="p-2">
                       <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2" style={{ background: T.paper }}>
                         <Field label="Mã số SV"><input className={inputCls} style={inputStyle} value={editForm.msv} onChange={(e) => setEditForm({ ...editForm, msv: e.target.value })} /></Field>
                         <Field label="Họ và tên"><input className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></Field>
@@ -2847,6 +2848,7 @@ function StudentsTab({ perm, user }) {
                 }
                 return (
                   <tr key={s.id} onClick={() => setSelectedId((id) => (id === s.id ? null : s.id))} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff", borderBottom: `1px solid ${T.paperDark}` }, selectedId === s.id)}>
+                    <td className="px-2.5 py-2 f-mono text-center" style={{ borderRight: `1px solid ${T.paperDark}`, color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-2.5 py-2 f-mono" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.msv || "—"}</td>
                     <td className="px-2.5 py-2 font-bold text-[11px]" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.name}</td>
                     <td className="px-2.5 py-2" style={{ borderRight: `1px solid ${T.paperDark}` }}>{s.gender || "—"}</td>
@@ -3163,10 +3165,36 @@ function RosterTab({ perm }) {
   const { items: students, loading } = useSharedList("students");
   const { items: rooms } = useSharedList("rooms");
   const [view, setView] = useState("dang_o"); // dang_o | tra_phong
+  const [filterBuilding, setFilterBuilding] = useState("");
+  const [filterArea, setFilterArea] = useState("");
+  const [filterRoom, setFilterRoom] = useState("");
+  const [filterKhoa, setFilterKhoa] = useState("");
+  const [filterLop, setFilterLop] = useState("");
 
   const dangO = students.filter((s) => s.status !== "Đã trả phòng");
   const traPhong = students.filter((s) => s.status === "Đã trả phòng");
-  const list = view === "dang_o" ? dangO : traPhong;
+  const baseList = view === "dang_o" ? dangO : traPhong;
+
+  // Danh mục để lọc nhanh theo Toà/Tầng/Phòng (lấy từ dữ liệu phòng thực tế) và theo Khoá/Lớp (lấy từ
+  // danh sách học viên đang xem — Đang ở nội trú hoặc Đã trả phòng).
+  const buildingOptions = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
+  const areaOptions = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
+  const roomOptions = rooms
+    .filter((r) => !filterBuilding || r.building === filterBuilding)
+    .filter((r) => !filterArea || r.area === filterArea)
+    .sort((a, b) => naturalCompare(a.building || "", b.building || "") || naturalCompare(a.area || "", b.area || "") || naturalCompare(String(a.roomNumber || ""), String(b.roomNumber || "")));
+  const khoaOptions = [...new Set(baseList.map((s) => s.khoa).filter(Boolean))].sort(naturalCompare);
+  const lopOptions = [...new Set(baseList.map((s) => s.lop).filter(Boolean))].sort(naturalCompare);
+
+  const list = baseList.filter((s) => {
+    const room = rooms.find((r) => r.id === s.roomId);
+    if (filterBuilding && room?.building !== filterBuilding) return false;
+    if (filterArea && room?.area !== filterArea) return false;
+    if (filterRoom && String(s.roomId) !== filterRoom) return false;
+    if (filterKhoa && s.khoa !== filterKhoa) return false;
+    if (filterLop && s.lop !== filterLop) return false;
+    return true;
+  });
 
   const groupCount = (arr, key) => arr.reduce((acc, s) => {
     const k = (s[key] || "").trim() || "Chưa rõ";
@@ -3230,11 +3258,35 @@ function RosterTab({ perm }) {
         </button>
       </div>
 
-      {loading ? <LoadingRow /> : list.length === 0 ? <EmptyState text="Không có học viên nào trong danh sách này." /> : (
+      <div className="flex flex-wrap gap-3 mb-4">
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterBuilding} onChange={(e) => { setFilterBuilding(e.target.value); setFilterArea(""); setFilterRoom(""); }}>
+          <option value="">— Tất cả toà nhà —</option>
+          {buildingOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterArea} onChange={(e) => { setFilterArea(e.target.value); setFilterRoom(""); }}>
+          <option value="">— Tất cả tầng/khu vực —</option>
+          {areaOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterRoom} onChange={(e) => setFilterRoom(e.target.value)}>
+          <option value="">— Tất cả phòng —</option>
+          {roomOptions.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterKhoa} onChange={(e) => setFilterKhoa(e.target.value)}>
+          <option value="">— Tất cả khoá —</option>
+          {khoaOptions.map((k) => <option key={k} value={k}>{k}</option>)}
+        </select>
+        <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={filterLop} onChange={(e) => setFilterLop(e.target.value)}>
+          <option value="">— Tất cả lớp —</option>
+          {lopOptions.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </div>
+
+      {loading ? <LoadingRow /> : list.length === 0 ? <EmptyState text="Không có học viên nào phù hợp." /> : (
         <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
-          <table className="w-full text-sm f-body table-lines">
+          <table className="w-full text-sm f-body table-lines table-grid">
             <thead>
               <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
+                <th className="text-center px-3 py-2 w-12">STT</th>
                 <th className="text-left px-3 py-2">Mã SV</th>
                 <th className="text-left px-3 py-2">Họ tên</th>
                 <th className="text-left px-3 py-2">Khoá/Lớp</th>
@@ -3247,6 +3299,7 @@ function RosterTab({ perm }) {
                 const room = rooms.find((r) => r.id === s.roomId);
                 return (
                   <tr key={s.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                    <td className="px-3 py-2 f-mono text-center" style={{ color: T.inkSoft }}>{i + 1}</td>
                     <td className="px-3 py-2 f-mono">{s.msv || "—"}</td>
                     <td className="px-3 py-2 font-medium">{s.name}</td>
                     <td className="px-3 py-2 f-mono">{s.khoa || "—"} / {s.lop || "—"}</td>
