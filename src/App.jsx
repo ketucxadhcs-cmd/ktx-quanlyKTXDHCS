@@ -53,7 +53,7 @@ const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký tú
 // tạo 1 "Email Template" có biến {{otp_code}} và {{to_email}} (Template ID) → lấy "Public Key" trong mục Account.
 // Nếu chưa điền, nút "Gửi mã qua email" sẽ báo lỗi rõ ràng thay vì gửi email thất bại âm thầm.
 const EMAILJS_SERVICE_ID = "service_q5aumv1";
-const EMAILJS_TEMPLATE_ID = "twg3uze";
+const EMAILJS_TEMPLATE_ID = "template_xyiw8a7";
 const EMAILJS_PUBLIC_KEY = "VrxOyWbgVTttdLygm";
 const ADMIN_RECOVERY_EMAIL = "ketucxadhcs@gmail.com"; // Nơi nhận mã OTP khi Quản trị quên cả Mã khôi phục
 const OTP_TTL_MS = 10 * 60 * 1000; // Mã OTP hết hạn sau 10 phút
