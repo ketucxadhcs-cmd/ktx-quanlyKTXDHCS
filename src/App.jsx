@@ -1917,8 +1917,12 @@ function RoomsTab({ perm }) {
       const bed = pickFreeBed(room.capacity, usedBedsByRoom[room.id] || new Set());
       if (bed) { updates[s.id] = bed; (usedBedsByRoom[room.id] || (usedBedsByRoom[room.id] = new Set())).add(bed); }
     });
-    if (Object.keys(updates).length === 0) return;
+    if (Object.keys(updates).length === 0) {
+      reportGlobalNotice("Không có giường nào cần gán — mọi sinh viên đã có số giường.");
+      return;
+    }
     await setStudents(students.map((s) => (updates[s.id] ? { ...s, bed: updates[s.id] } : s)));
+    reportGlobalNotice(`Đã gán giường cho ${Object.keys(updates).length} sinh viên.`);
   };
 
   const blankForm = { building: "", area: "", roomNumber: "", capacity: "4", gender: "Nam", status: "Trống", note: "", imageUrl: "" };
