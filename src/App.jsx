@@ -1325,7 +1325,7 @@ function DashboardTab({ perm, onNavigate }) {
             <div className="stamp-border p-4" style={{ background: "#fff" }}>
               <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
 
-              <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.inkSoft }}>Yêu cầu sửa chữa</div>
+              <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
               <div className="space-y-1 mb-3">
                 {MAINT_STATUS.map((s) => (
                   <div key={s} className="flex items-center justify-between f-body text-sm">
@@ -1341,7 +1341,7 @@ function DashboardTab({ perm, onNavigate }) {
 
               {isAllowed("assets") && (
                 <>
-                  <div className="f-mono text-[9.5px] uppercase tracking-widest mb-1.5" style={{ color: T.inkSoft }}>Tài sản</div>
+                  <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
                   <div className="space-y-1">
                     {ASSET_STATUS.map((s) => (
                       <div key={s} className="flex items-center justify-between f-body text-sm">
