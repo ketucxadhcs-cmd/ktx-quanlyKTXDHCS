@@ -1381,51 +1381,42 @@ function DashboardTab({ perm, onNavigate }) {
                     <tr className="f-mono text-[10.5px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
                       <th className="text-center px-3 py-2">Tòa nhà</th>
                       <th className="text-center px-3 py-2">Số phòng</th>
-                      <th className="text-center px-3 py-2">Số giường trống</th>
                       <th className="text-center px-3 py-2">Sức chứa</th>
                       <th className="text-center px-3 py-2">Đang ở</th>
-                      <th className="text-center px-3 py-2">Phòng còn trống</th>
+                      <th className="text-center px-3 py-2">Còn trống</th>
                       <th className="text-center px-3 py-2">Bảo trì</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {buildingStats.map((b, i) => (
-                      <tr key={b.building} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                        <td className="text-center px-3 py-2 font-medium" style={{ color: T.green }}>{b.building}</td>
-                        <td className="text-center px-3 py-2 f-mono">{b.roomCount}</td>
-                        <td className="text-center px-3 py-2 f-mono" style={{ color: T.green }}>
-                          {Math.max(b.capacity - b.occupied, 0) > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => setViewBuildingFree(b.building)}
-                              className="underline underline-offset-2 font-semibold btn-press"
-                              style={{ color: T.green }}
-                              title="Xem chi tiết phòng/giường còn trống"
-                            >
-                              {Math.max(b.capacity - b.occupied, 0)} giường trống
-                            </button>
-                          ) : (
-                            "0 giường trống"
-                          )}
-                        </td>
-                        <td className="text-center px-3 py-2 f-mono">{b.capacity}</td>
-                        <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{b.occupied}</td>
-                        <td className="text-center px-3 py-2 f-mono" style={{ color: T.green }}>
-                          {b.free > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => setViewBuildingFree(b.building)}
-                              className="underline underline-offset-2 font-semibold btn-press"
-                              style={{ color: T.green }}
-                              title="Xem chi tiết phòng/giường còn trống"
-                            >
-                              {b.free}
-                            </button>
-                          ) : b.free}
-                        </td>
-                        <td className="text-center px-3 py-2 f-mono" style={{ color: b.maintenance > 0 ? T.red : T.inkSoft }}>{b.maintenance}</td>
-                      </tr>
-                    ))}
+                    {buildingStats.map((b, i) => {
+                      const freeBeds = Math.max(b.capacity - b.occupied, 0);
+                      return (
+                        <tr key={b.building} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                          <td className="text-center px-3 py-2 font-medium" style={{ color: T.green }}>{b.building}</td>
+                          <td className="text-center px-3 py-2 f-mono">{b.roomCount}</td>
+                          <td className="text-center px-3 py-2 f-mono">{b.capacity}</td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{b.occupied}</td>
+                          <td className="text-center px-3 py-2 f-mono">
+                            {b.free > 0 || freeBeds > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewBuildingFree(b.building)}
+                                className="btn-press"
+                                style={{ color: T.green }}
+                              >
+                                <div className="font-semibold underline underline-offset-2">
+                                  {b.free} ({freeBeds} giường trống)
+                                </div>
+                                <div className="f-body italic" style={{ color: T.inkSoft, fontSize: 10 }}>chạm để xem chi tiết</div>
+                              </button>
+                            ) : (
+                              <div>{b.free} (0 giường trống)</div>
+                            )}
+                          </td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: b.maintenance > 0 ? T.red : T.inkSoft }}>{b.maintenance}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
