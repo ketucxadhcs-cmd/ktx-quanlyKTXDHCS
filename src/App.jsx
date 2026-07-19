@@ -3678,11 +3678,23 @@ function MaintenanceTab({ perm, user }) {
 
   const technicians = permissions.filter((p) => p.role === "ky_thuat").map((p) => p.name);
 
+  // Xác định phòng của học viên đang đăng nhập (so tên, không phân biệt hoa/thường) để chỉ cho họ
+  // thấy yêu cầu bảo trì của đúng phòng mình đang ở, không thấy yêu cầu của phòng khác — bảo mật thông tin.
+  const myStudent = students.find((s) => perm.isOwner(s.name));
+  const myRoomId = myStudent ? myStudent.roomId : null;
+  // Học viên (không có canMaintain) chỉ được gửi yêu cầu cho ĐÚNG phòng mình đang ở — khoá cứng, không cho
+  // chọn phòng khác qua dropdown như trước (tránh gửi nhầm/gửi hộ phòng không phải của mình).
+  const isStudentRole = perm.role === "sinh_vien";
+
   const submit = async () => {
-    if (!form.roomId || !form.title.trim()) { setWarn("Vui lòng chọn Phòng và nhập Nội dung yêu cầu trước khi gửi."); return; }
+    const roomIdToUse = isStudentRole ? myRoomId : form.roomId;
+    if (!roomIdToUse || !form.title.trim()) {
+      setWarn(isStudentRole && !myRoomId ? "Bạn chưa được xếp phòng nên không thể gửi yêu cầu sửa chữa. Vui lòng liên hệ Ban quản lý." : "Vui lòng chọn Phòng và nhập Nội dung yêu cầu trước khi gửi.");
+      return;
+    }
     setWarn("");
     await setRequests([
-      { id: Date.now(), roomId: Number(form.roomId), title: form.title, description: form.description, imageUrl: form.imageUrl, reporterName: user, status: "Chờ xử lý", createdAt: new Date().toISOString(), technicianNote: "", assignedTo: "" },
+      { id: Date.now(), roomId: Number(roomIdToUse), title: form.title, description: form.description, imageUrl: form.imageUrl, reporterName: user, status: "Chờ xử lý", createdAt: new Date().toISOString(), technicianNote: "", assignedTo: "" },
       ...requests,
     ]);
     setForm({ roomId: "", title: "", description: "", imageUrl: "" });
@@ -3703,10 +3715,6 @@ function MaintenanceTab({ perm, user }) {
   // (canManage) mới xoá được, hoặc chính học viên gửi yêu cầu tự xoá khi yêu cầu còn đang "Chờ xử lý".
   const canDelete = (r) => perm.canManage || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
 
-  // Xác định phòng của học viên đang đăng nhập (so tên, không phân biệt hoa/thường) để chỉ cho họ
-  // thấy yêu cầu bảo trì của đúng phòng mình đang ở, không thấy yêu cầu của phòng khác — bảo mật thông tin.
-  const myStudent = students.find((s) => perm.isOwner(s.name));
-  const myRoomId = myStudent ? myStudent.roomId : null;
   const visibleByRole = perm.canMaintain
     ? requests
     : requests.filter((r) => perm.isOwner(r.reporterName) || (myRoomId != null && String(r.roomId) === String(myRoomId)));
@@ -3723,10 +3731,21 @@ function MaintenanceTab({ perm, user }) {
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
           <div className="md:col-span-2"><FormWarning message={warn} /></div>
           <Field label="Phòng" required>
-            <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
-              <option value="">— Chọn phòng —</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
-            </select>
+            {isStudentRole ? (
+              myRoomId != null ? (
+                <div className="f-body text-sm px-3 py-2 rounded-sm" style={{ background: T.paperDark, color: T.ink, border: `1px solid ${T.paperDark}` }}>
+                  {roomLabel(rooms.find((r) => r.id === myRoomId)) || "—"}
+                  <span className="f-mono text-[10px] block mt-0.5" style={{ color: T.inkSoft }}>Chỉ có thể gửi yêu cầu cho đúng phòng bạn đang ở</span>
+                </div>
+              ) : (
+                <div className="f-body text-xs italic" style={{ color: T.red }}>Bạn chưa được xếp phòng nên không thể gửi yêu cầu — vui lòng liên hệ Ban quản lý.</div>
+              )
+            ) : (
+              <select className={inputCls} style={inputStyle} value={form.roomId} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
+                <option value="">— Chọn phòng —</option>
+                {rooms.map((r) => <option key={r.id} value={r.id}>{roomLabel(r)}</option>)}
+              </select>
+            )}
           </Field>
           <Field label="Nội dung yêu cầu" required><input className={inputCls} style={inputStyle} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="VD: Hỏng bóng đèn, rò rỉ nước…" /></Field>
           <div className="md:col-span-2">
@@ -3738,7 +3757,7 @@ function MaintenanceTab({ perm, user }) {
               {form.imageUrl && <img src={form.imageUrl} alt="Ảnh yêu cầu" className="w-20 h-20 object-cover stamp-border mt-2" />}
             </Field>
           </div>
-          <div className="md:col-span-2"><Btn onClick={submit}>Gửi yêu cầu</Btn></div>
+          <div className="md:col-span-2"><Btn onClick={submit} disabled={isStudentRole && myRoomId == null}>Gửi yêu cầu</Btn></div>
         </div>
       )}
 
