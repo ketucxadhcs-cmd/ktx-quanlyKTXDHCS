@@ -2088,7 +2088,7 @@ function RoomsTab({ perm }) {
                                                         color: occByBed ? T.green : T.inkSoft,
                                                         fontStyle: occByBed ? "normal" : "italic",
                                                         fontWeight: occByBed ? 600 : 400,
-                                                        fontSize: 9.5,
+                                                        fontSize: 6.5,
                                                         whiteSpace: "normal",
                                                         overflowWrap: "break-word",
                                                         display: "-webkit-box",
