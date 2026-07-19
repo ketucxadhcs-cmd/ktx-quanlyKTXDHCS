@@ -1727,6 +1727,7 @@ function RoomsTab({ perm }) {
   const [mergeFrom, setMergeFrom] = useState(null);
   const [mergeTarget, setMergeTarget] = useState("");
   const [mergeReason, setMergeReason] = useState("");
+  const [mergeSelected, setMergeSelected] = useState(new Set());
   const [maintTarget, setMaintTarget] = useState(null); // Phòng đang có SV ở, đang chờ xác nhận lý do trước khi đánh dấu bảo trì
   const [maintReason, setMaintReason] = useState("");
   const [maintNote, setMaintNote] = useState("");
@@ -1832,12 +1833,38 @@ function RoomsTab({ perm }) {
     setRenamingBuilding(null);
   };
 
+  // Mở hộp dồn phòng: mặc định tick sẵn toàn bộ sinh viên trong phòng (giữ hành vi cũ), nhưng cho phép
+  // bỏ tick bớt để chỉ chuyển một phần, thuận tiện khi không cần dồn hết cả phòng.
+  const openMerge = (r) => {
+    setMergeFrom(r);
+    setMergeTarget("");
+    setMergeReason("");
+    setMergeSelected(new Set(occupantsOf(r.id).map((s) => s.id)));
+  };
+  const closeMerge = () => {
+    setMergeFrom(null);
+    setMergeTarget("");
+    setMergeReason("");
+    setMergeSelected(new Set());
+  };
+  const toggleMergeSelect = (id) => {
+    setMergeSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleMergeSelectAll = (allIds) => {
+    setMergeSelected((prev) => (prev.size === allIds.length ? new Set() : new Set(allIds)));
+  };
+
   const doMerge = async () => {
     if (!mergeFrom || !mergeTarget) return;
     if (!mergeReason) { reportGlobalError("Vui lòng chọn lý do dồn phòng trước khi xác nhận."); return; }
     const target = rooms.find((r) => r.id === Number(mergeTarget));
     if (!target) return;
-    const moving = occupantsOf(mergeFrom.id);
+    const moving = occupantsOf(mergeFrom.id).filter((s) => mergeSelected.has(s.id));
+    if (moving.length === 0) { reportGlobalError("Vui lòng chọn ít nhất một sinh viên để chuyển phòng."); return; }
     const already = occupantsOf(target.id).length;
     const room = target.capacity ? Number(target.capacity) : Infinity;
     if (already + moving.length > room) {
@@ -1847,10 +1874,12 @@ function RoomsTab({ perm }) {
     const movingIds = new Set(moving.map((s) => s.id));
     const reasonNote = `Dồn phòng ngày ${new Date().toLocaleDateString("vi-VN")} từ ${roomLabel(mergeFrom)} — Lý do: ${mergeReason}`;
     await setStudents(students.map((s) => (movingIds.has(s.id) ? { ...s, roomId: target.id, bed: "", note: s.note ? `${s.note} | ${reasonNote}` : reasonNote } : s)));
-    await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống", maintenanceReason: "", maintenanceNote: "" } : r)));
-    setMergeFrom(null);
-    setMergeTarget("");
-    setMergeReason("");
+    // Phòng gốc chỉ chuyển về Trống nếu đã chuyển hết toàn bộ sinh viên đang ở — nếu chỉ dồn một phần thì vẫn còn người ở, giữ nguyên trạng thái.
+    const stillOccupied = occupantsOf(mergeFrom.id).length > moving.length;
+    if (!stillOccupied) {
+      await setRooms(rooms.map((r) => (r.id === mergeFrom.id ? { ...r, status: "Trống", maintenanceReason: "", maintenanceNote: "" } : r)));
+    }
+    closeMerge();
   };
 
   const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
@@ -2192,7 +2221,7 @@ function RoomsTab({ perm }) {
                                     <button className="f-mono text-[10px] underline" style={{ color: T.green }} onClick={() => toggleStatus(r, occ.length > 0 ? "Đang ở" : "Trống")}>Bỏ đánh dấu bảo trì</button>
                                   )}
                                   {occ.length > 0 && (
-                                    <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => { setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng…</button>
+                                    <button className="f-mono text-[10px] underline" style={{ color: T.amberDark }} onClick={() => openMerge(r)}>Dồn phòng…</button>
                                   )}
                                 </div>
                               )}
@@ -2212,14 +2241,36 @@ function RoomsTab({ perm }) {
       )}
 
       {mergeFrom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => { setMergeFrom(null); setMergeReason(""); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={closeMerge}>
           <div className="stamp-border p-5 w-full max-w-md" style={{ background: "#fff" }} onClick={(e) => e.stopPropagation()}>
             <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>
               Dồn phòng {roomLabel(mergeFrom)}
             </div>
             <p className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
-              Toàn bộ {occupantsOf(mergeFrom.id).length} sinh viên đang ở phòng này sẽ được chuyển sang phòng đích bên dưới; phòng gốc sẽ chuyển về trạng thái Trống.
+              Chọn sinh viên cần chuyển sang phòng đích bên dưới (mặc định chọn sẵn toàn bộ, có thể bỏ tick bớt nếu không cần chuyển hết). Nếu chuyển hết toàn bộ, phòng gốc sẽ chuyển về trạng thái Trống; nếu chỉ chuyển một phần, phòng gốc giữ nguyên trạng thái.
             </p>
+            {(() => {
+              const occ = occupantsOf(mergeFrom.id);
+              const allIds = occ.map((s) => s.id);
+              const allSelected = occ.length > 0 && mergeSelected.size === occ.length;
+              return (
+                <div className="mb-3">
+                  <label className="flex items-center gap-2 f-body text-xs font-medium pb-1.5 mb-1.5 cursor-pointer" style={{ color: T.ink, borderBottom: `1px dashed ${T.paperDark}` }}>
+                    <input type="checkbox" checked={allSelected} onChange={() => toggleMergeSelectAll(allIds)} />
+                    Chọn tất cả ({mergeSelected.size}/{occ.length})
+                  </label>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {occ.map((s) => (
+                      <label key={s.id} className="flex items-center gap-2 f-body text-xs cursor-pointer" style={{ color: T.ink }}>
+                        <input type="checkbox" checked={mergeSelected.has(s.id)} onChange={() => toggleMergeSelect(s.id)} />
+                        {s.name}{s.msv ? ` · ${s.msv}` : ""}
+                      </label>
+                    ))}
+                    {occ.length === 0 && <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Phòng này hiện không có sinh viên.</div>}
+                  </div>
+                </div>
+              );
+            })()}
             <Field label="Phòng đích" required>
               <select className={inputCls} style={inputStyle} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
                 <option value="">— Chọn phòng đích —</option>
@@ -2235,8 +2286,8 @@ function RoomsTab({ perm }) {
               </select>
             </Field>
             <div className="flex gap-2 mt-2">
-              <Btn onClick={doMerge} disabled={!mergeTarget || !mergeReason}>Xác nhận dồn phòng</Btn>
-              <Btn variant="outline" onClick={() => { setMergeFrom(null); setMergeReason(""); }}>Huỷ</Btn>
+              <Btn onClick={doMerge} disabled={!mergeTarget || !mergeReason || mergeSelected.size === 0}>Xác nhận dồn phòng ({mergeSelected.size})</Btn>
+              <Btn variant="outline" onClick={closeMerge}>Huỷ</Btn>
             </div>
           </div>
         </div>
@@ -2264,7 +2315,7 @@ function RoomsTab({ perm }) {
             </Field>
             <div className="flex gap-2 mt-2 flex-wrap">
               <Btn onClick={confirmMaintenance} disabled={!maintReason}>Xác nhận đánh dấu bảo trì</Btn>
-              <Btn variant="outline" onClick={() => { const r = maintTarget; setMaintTarget(null); setMergeFrom(r); setMergeTarget(""); }}>Dồn phòng cho SV trước</Btn>
+              <Btn variant="outline" onClick={() => { const r = maintTarget; setMaintTarget(null); openMerge(r); }}>Dồn phòng cho SV trước</Btn>
               <Btn variant="outline" onClick={() => setMaintTarget(null)}>Huỷ</Btn>
             </div>
           </div>
@@ -3483,6 +3534,7 @@ function MaintenanceTab({ perm, user }) {
   const { items: requests, setItems: setRequests, loading } = useSharedList("maintenance");
   const { items: rooms } = useSharedList("rooms");
   const { items: permissions } = useSharedList("permissions");
+  const { items: students } = useSharedList("students");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ roomId: "", title: "", description: "", imageUrl: "" });
   const [warn, setWarn] = useState("");
@@ -3515,12 +3567,21 @@ function MaintenanceTab({ perm, user }) {
   };
 
   const canDelete = (r) => perm.canMaintain || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
-  const filtered = filterStatus ? requests.filter((r) => r.status === filterStatus) : requests;
+
+  // Xác định phòng của học viên đang đăng nhập (so tên, không phân biệt hoa/thường) để chỉ cho họ
+  // thấy yêu cầu bảo trì của đúng phòng mình đang ở, không thấy yêu cầu của phòng khác — bảo mật thông tin.
+  const myStudent = students.find((s) => perm.isOwner(s.name));
+  const myRoomId = myStudent ? myStudent.roomId : null;
+  const visibleByRole = perm.canMaintain
+    ? requests
+    : requests.filter((r) => perm.isOwner(r.reporterName) || (myRoomId != null && String(r.roomId) === String(myRoomId)));
+
+  const filtered = filterStatus ? visibleByRole.filter((r) => r.status === filterStatus) : visibleByRole;
   const statusColor = { "Chờ xử lý": T.red, "Đang xử lý": T.amberDark, "Hoàn thành": T.green, "Từ chối": T.inkSoft };
 
   return (
     <div>
-      <SectionHeader compact icon={Wrench} eyebrow={`Tổng số yêu cầu: ${requests.length}`} title="Quản lý bảo trì"
+      <SectionHeader compact icon={Wrench} eyebrow={`Tổng số yêu cầu: ${visibleByRole.length}`} title="Quản lý bảo trì"
         action={<Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi yêu cầu sửa chữa</Btn>} />
 
       {showForm && (
