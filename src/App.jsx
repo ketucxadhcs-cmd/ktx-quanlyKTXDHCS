@@ -1807,7 +1807,14 @@ function DashboardTab({ perm, onNavigate }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div className="stamp-border p-4" style={{ background: "#fff" }}>
-              <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Trạng thái phòng</div>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="f-display text-sm uppercase tracking-wider" style={{ color: T.amberDark }}>Trạng thái phòng</div>
+                {goIfAllowed("rooms") && (
+                  <button onClick={goIfAllowed("rooms")} className="f-mono text-[11px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.green }}>
+                    Xem chi tiết
+                  </button>
+                )}
+              </div>
               <div className="space-y-2">
                 {ROOM_STATUS.map((s) => (
                   <div key={s} className="flex items-center justify-between f-body text-sm">
@@ -1832,7 +1839,14 @@ function DashboardTab({ perm, onNavigate }) {
             <div className="stamp-border p-4" style={{ background: "#fff" }}>
               <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
 
-              <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
+              <div className="flex items-center justify-between mb-1.5 pb-1" style={{ borderBottom: `1.5px solid ${T.green}` }}>
+                <div className="f-mono text-[11px] font-bold uppercase tracking-widest" style={{ color: T.green }}>Yêu cầu sửa chữa</div>
+                {goIfAllowed("maintenance") && (
+                  <button onClick={goIfAllowed("maintenance")} className="f-mono text-[10.5px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.green }}>
+                    Xem
+                  </button>
+                )}
+              </div>
               <div className="space-y-1 mb-3">
                 {MAINT_STATUS.map((s) => (
                   <div key={s} className="flex items-center justify-between f-body text-sm">
@@ -1848,7 +1862,14 @@ function DashboardTab({ perm, onNavigate }) {
 
               {isAllowed("assets") && (
                 <>
-                  <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
+                  <div className="flex items-center justify-between mb-1.5 pb-1" style={{ borderBottom: `1.5px solid ${T.amberDark}` }}>
+                    <div className="f-mono text-[11px] font-bold uppercase tracking-widest" style={{ color: T.amberDark }}>Tài sản</div>
+                    {goIfAllowed("assets") && (
+                      <button onClick={goIfAllowed("assets")} className="f-mono text-[10.5px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.amberDark }}>
+                        Xem
+                      </button>
+                    )}
+                  </div>
                   <div className="space-y-1">
                     {ASSET_STATUS.map((s) => (
                       <div key={s} className="flex items-center justify-between f-body text-sm">
@@ -1867,7 +1888,14 @@ function DashboardTab({ perm, onNavigate }) {
           </div>
 
           <div className="stamp-border p-4" style={{ background: "#fff" }}>
-            <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Thống kê theo tòa nhà</div>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="f-display text-sm uppercase tracking-wider" style={{ color: T.amberDark }}>Thống kê theo tòa nhà</div>
+              {goIfAllowed("rooms") && (
+                <button onClick={goIfAllowed("rooms")} className="f-mono text-[11px] uppercase tracking-wide underline underline-offset-2" style={{ color: T.green }}>
+                  Xem chi tiết
+                </button>
+              )}
+            </div>
             {buildingStats.length === 0 ? <EmptyState text="Chưa có dữ liệu tòa nhà / phòng." /> : (
               <div className="overflow-x-auto stamp-border" style={{ background: "#fff" }}>
                 <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
