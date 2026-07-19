@@ -53,7 +53,7 @@ const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký tú
 // tạo 1 "Email Template" có biến {{otp_code}} và {{to_email}} (Template ID) → lấy "Public Key" trong mục Account.
 // Nếu chưa điền, nút "Gửi mã qua email" sẽ báo lỗi rõ ràng thay vì gửi email thất bại âm thầm.
 const EMAILJS_SERVICE_ID = "service_q5aumv1";
-const EMAILJS_TEMPLATE_ID = "template_xyiw8a7";
+const EMAILJS_TEMPLATE_ID = "twg3uze";
 const EMAILJS_PUBLIC_KEY = "VrxOyWbgVTttdLygm";
 const ADMIN_RECOVERY_EMAIL = "ketucxadhcs@gmail.com"; // Nơi nhận mã OTP khi Quản trị quên cả Mã khôi phục
 const OTP_TTL_MS = 10 * 60 * 1000; // Mã OTP hết hạn sau 10 phút
@@ -1667,7 +1667,7 @@ function DashboardTab({ perm, onNavigate }) {
 
   const StatCard = ({ icon: Icon, label, value, accent, onClick }) => (
     <div
-      className={`stamp-border p-4 card-item ${onClick ? "cursor-pointer" : ""}`}
+      className={`stamp-border p-4 card-item relative ${onClick ? "cursor-pointer" : ""}`}
       style={{ background: "#fff" }}
       onClick={onClick}
       role={onClick ? "button" : undefined}
@@ -1678,7 +1678,19 @@ function DashboardTab({ perm, onNavigate }) {
         <span className="icon-badge" style={{ background: accent || T.green, color: "#fff" }}><Icon size={14} /></span>
         <span className="f-mono text-[10.5px] uppercase tracking-widest" style={{ color: T.inkSoft }}>{label}</span>
       </div>
-      <div className="f-display text-3xl font-semibold" style={{ color: T.green }}>{value}</div>
+      <div className="flex items-end justify-between gap-2">
+        <div className="f-display text-3xl font-semibold" style={{ color: T.green }}>{value}</div>
+        {onClick && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            className="f-mono text-[10px] uppercase tracking-wide underline underline-offset-2 shrink-0 pb-1"
+            style={{ color: T.green }}
+          >
+            Xem
+          </button>
+        )}
+      </div>
     </div>
   );
 
