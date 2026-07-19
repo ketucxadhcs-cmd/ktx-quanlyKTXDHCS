@@ -1366,6 +1366,10 @@ function DashboardTab({ perm, onNavigate }) {
       <SectionHeader icon={LayoutGrid} eyebrow="Tổng quan" title="Bảng điều khiển ký túc xá" />
       {loading ? <LoadingRow /> : isTechOnly ? (
         <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard icon={ClipboardCheck} label="Yêu cầu sửa chữa" value={pendingMaint} accent={T.red} onClick={goIfAllowed("maintenance")} />
+          </div>
+
           <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
             <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
 
@@ -3655,7 +3659,7 @@ function AssetsTab({ perm, user }) {
                             <button onClick={(e) => { e.stopPropagation(); liquidate(a.id); }} title="Thanh lý tài sản"><AlertTriangle size={13} style={{ color: T.red }} /></button>
                           )}
                           <button onClick={(e) => { e.stopPropagation(); startEdit(a); }} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                          <button onClick={(e) => { e.stopPropagation(); remove(a.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                          {perm.canManage && <button onClick={(e) => { e.stopPropagation(); remove(a.id); }} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>}
                         </div>
                       )}
                     </td>
@@ -3709,7 +3713,9 @@ function MaintenanceTab({ perm, user }) {
     await setRequests(requests.map((r) => (r.id === id ? { ...r, assignedTo: assignDraft[id] ?? r.assignedTo } : r)));
   };
 
-  const canDelete = (r) => perm.canMaintain || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
+  // Kỹ thuật chỉ được cập nhật trạng thái/ghi chú/phân công, KHÔNG được xoá yêu cầu — chỉ Quản trị/Cán bộ quản lý
+  // (canManage) mới xoá được, hoặc chính học viên gửi yêu cầu tự xoá khi yêu cầu còn đang "Chờ xử lý".
+  const canDelete = (r) => perm.canManage || (perm.isOwner(r.reporterName) && r.status === "Chờ xử lý");
 
   // Xác định phòng của học viên đang đăng nhập (so tên, không phân biệt hoa/thường) để chỉ cho họ
   // thấy yêu cầu bảo trì của đúng phòng mình đang ở, không thấy yêu cầu của phòng khác — bảo mật thông tin.
