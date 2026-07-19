@@ -48,6 +48,23 @@ const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký tú
 */
 const normalizeName = (n) => (n || "").trim().toLowerCase();
 
+// Đối chiếu 2 bản ghi sinh viên có phải cùng một người hay không, dùng khi nhập danh sách hàng loạt để
+// tránh thêm trùng: nếu có Mã số SV thì so trực tiếp mã số; nếu không có mã số, phải trùng HOÀN TOÀN
+// họ và tên rồi mới đối chiếu thêm năm sinh, lớp, khoá, đơn vị tuyển sinh — trùng hết các mục này mới
+// coi là cùng một sinh viên (họ tên trùng nhưng năm sinh/lớp/khoá khác nhau vẫn được coi là 2 người khác nhau).
+function isSameStudentRecord(a, b) {
+  const msvA = normalizeName(a?.msv), msvB = normalizeName(b?.msv);
+  if (msvA && msvB) return msvA === msvB;
+  if (normalizeName(a?.name) !== normalizeName(b?.name)) return false;
+  const yearOf = (dob) => String(dob || "").slice(0, 4);
+  return (
+    yearOf(a?.dob) === yearOf(b?.dob) &&
+    normalizeName(a?.lop) === normalizeName(b?.lop) &&
+    normalizeName(a?.khoa) === normalizeName(b?.khoa) &&
+    normalizeName(a?.donViTuyenSinh) === normalizeName(b?.donViTuyenSinh)
+  );
+}
+
 // Tải file thật sự về máy (giống Zalo/Messenger) thay vì chỉ mở tab mới xem ảnh.
 function forceDownload(url, filename) {
   if (!url) return;
@@ -234,9 +251,20 @@ async function downloadFileFromUrl(url, filename) {
   }
 }
 function reportGlobalError(message) {
-  const entry = { id: Date.now() + Math.random(), message };
+  const entry = { id: Date.now() + Math.random(), message, kind: "error" };
   _globalErrors = [..._globalErrors, entry].slice(-4);
   _errorListeners.forEach((fn) => fn(_globalErrors));
+}
+// Thông báo "thành công" (VD: nhập xong bao nhiêu sinh viên mới) — dùng chung khung banner với báo lỗi,
+// nhưng màu xanh và tự biến mất sau vài giây, không cần người dùng bấm đóng tay.
+function reportGlobalNotice(message) {
+  const entry = { id: Date.now() + Math.random(), message, kind: "success" };
+  _globalErrors = [..._globalErrors, entry].slice(-4);
+  _errorListeners.forEach((fn) => fn(_globalErrors));
+  setTimeout(() => {
+    _globalErrors = _globalErrors.filter((e) => e.id !== entry.id);
+    _errorListeners.forEach((fn) => fn(_globalErrors));
+  }, 6000);
 }
 function useGlobalErrors() {
   const [errors, setErrors] = useState(_globalErrors);
@@ -259,9 +287,9 @@ function ErrorBanner() {
         <div
           key={e.id}
           className="f-body text-xs px-4 py-3 flex items-start justify-between gap-3"
-          style={{ background: T.red, color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+          style={{ background: e.kind === "success" ? T.green : T.red, color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
         >
-          <span className="flex-1"><b>Lỗi kết nối dữ liệu:</b> {e.message}</span>
+          <span className="flex-1">{e.kind === "success" ? e.message : (<><b>Lỗi kết nối dữ liệu:</b> {e.message}</>)}</span>
           <button onClick={() => dismiss(e.id)} style={{ color: "#fff" }} aria-label="Đóng"><X size={15} /></button>
         </div>
       ))}
@@ -954,9 +982,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
 
   const previewRows = srcMode === "file" ? mappedFileRows : (ocrRows || []);
   const [selectedRows, setSelectedRows] = useState({});
-  const existingMsvSet = new Set(existingItems.map((m) => normalizeName(m.msv)).filter(Boolean));
-  const existingNameSet = new Set(existingItems.map((m) => normalizeName(m.name)));
-  const isDup = (r) => (r.msv && existingMsvSet.has(normalizeName(r.msv))) || (!r.msv && r.name && existingNameSet.has(normalizeName(r.name)));
+  const isDup = (r) => existingItems.some((s) => isSameStudentRecord(r, s));
 
   useEffect(() => {
     const next = {};
@@ -997,7 +1023,20 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
   const confirmImport = () => {
     const chosen = previewRows.filter((r, i) => selectedRows[i] && r.name);
     if (chosen.length === 0) return;
-    onConfirm(chosen.map((r, idx) => ({
+    // Đối chiếu lần cuối trước khi lưu: bỏ qua sinh viên đã có sẵn trong danh sách hiện tại, và cũng
+    // bỏ qua trùng lặp ngay trong chính đợt đang nhập (VD: cùng 1 người xuất hiện 2 dòng trong file).
+    const toAdd = [];
+    let skippedCount = 0;
+    chosen.forEach((r) => {
+      const isDuplicate = existingItems.some((s) => isSameStudentRecord(r, s)) || toAdd.some((s) => isSameStudentRecord(r, s));
+      if (isDuplicate) { skippedCount++; return; }
+      toAdd.push(r);
+    });
+    if (toAdd.length === 0) {
+      reportGlobalNotice(`Không có sinh viên mới nào được thêm — cả ${skippedCount} sinh viên đã chọn đều đã có sẵn trong danh sách.`);
+      return;
+    }
+    onConfirm(toAdd.map((r, idx) => ({
       id: Date.now() + idx,
       stt: r.stt || "",
       msv: r.msv || "",
@@ -1013,6 +1052,7 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
       status: "Chưa xếp phòng",
       note: r.roomNumber ? `Ghi chú số phòng khi nhập: ${r.roomNumber}` : "",
     })));
+    reportGlobalNotice(`Đã thêm mới ${toAdd.length} sinh viên.${skippedCount > 0 ? ` Bỏ qua ${skippedCount} sinh viên đã có sẵn trong danh sách.` : ""}`);
   };
 
   return (
@@ -2593,8 +2633,7 @@ function StudentsTab({ perm, user }) {
           existingItems={students}
           onClose={() => setShowImport(false)}
           onConfirm={async (rows) => {
-            const filtered2 = rows.filter((r) => !students.some((s) => normalizeName(s.msv) === normalizeName(r.msv) && r.msv));
-            await setStudents([...students, ...filtered2]);
+            await setStudents([...students, ...rows]);
             setShowImport(false);
           }}
         />
