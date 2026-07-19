@@ -3778,6 +3778,9 @@ function UtilitiesTab({ perm, user }) {
   const [editForm, setEditForm] = useState(null);
   const [editWarn, setEditWarn] = useState("");
   const [showMissing, setShowMissing] = useState(false);
+  // Bảng nhật ký: mặc định mỗi phòng chỉ hiện bản ghi THÁNG MỚI NHẤT cho gọn — bấm vào tháng để xem lại các tháng đã qua.
+  const [expandedRooms, setExpandedRooms] = useState({});
+  const toggleRoomHistory = (key) => setExpandedRooms((s) => ({ ...s, [key]: !s[key] }));
 
   // Số người đang thực ở trong từng phòng (để tính định mức điện/nước miễn phí theo đầu người).
   const occCountOf = (roomId) => students.filter((s) => String(s.roomId) === String(roomId) && s.status !== "Đã trả phòng").length;
@@ -3846,6 +3849,8 @@ function UtilitiesTab({ perm, user }) {
     const prev = prevRecords[0];
     return {
       ...r,
+      prevElectricityIndex: prev ? prev.electricityIndex : null,
+      prevWaterIndex: prev ? prev.waterIndex : null,
       elecUsage: prev ? r.electricityIndex - prev.electricityIndex : null,
       waterUsage: prev ? r.waterIndex - prev.waterIndex : null,
     };
@@ -4179,8 +4184,8 @@ function UtilitiesTab({ perm, user }) {
                                   </div>
                                   {rec ? (
                                     <div className="f-body text-xs mt-2 space-y-0.5" style={{ color: T.ink }}>
-                                      <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
-                                      <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
+                                      <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.prevElectricityIndex !== null && <span className="f-mono" style={{ color: T.inkSoft }}>/{rec.prevElectricityIndex}</span>}{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
+                                      <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.prevWaterIndex !== null && <span className="f-mono" style={{ color: T.inkSoft }}>/{rec.prevWaterIndex}</span>}{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
                                       {(() => {
                                         const over = overQuotaOf(rec, r.id);
                                         if (over.elecOver === null && over.waterOver === null) return null;
@@ -4221,7 +4226,8 @@ function UtilitiesTab({ perm, user }) {
       ) : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
         <div className="space-y-4">
         <div className="f-body text-xs" style={{ color: T.inkSoft }}>
-          Hiện {filtered.length} bản ghi phù hợp, chia theo {logBuildingKeys.length} toà nhà.
+          Hiện {filtered.length} bản ghi phù hợp, chia theo {logBuildingKeys.length} toà nhà. Mỗi phòng chỉ hiện chỉ số tháng gần nhất — bấm vào ô Tháng để xem lại các tháng đã qua.
+          <span className="italic"> (Ghi chú: cột chỉ số hiển thị dạng <b className="f-mono not-italic">Chỉ số mới/Chỉ số cũ</b>.)</span>
         </div>
         {editingId && (
           <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
@@ -4254,12 +4260,27 @@ function UtilitiesTab({ perm, user }) {
         )}
         {logBuildingKeys.map((building) => {
           const list = logGroups[building];
+          // Gom các bản ghi trong toà theo từng phòng — list đã được sắp theo tháng giảm dần trong cùng 1 phòng,
+          // nên bản ghi đầu tiên của mỗi phòng chính là tháng gần nhất, các bản ghi còn lại là lịch sử tháng cũ.
+          const roomOrder = [];
+          const byRoom = {};
+          list.forEach((r) => {
+            const key = String(r.roomId);
+            if (!byRoom[key]) { byRoom[key] = []; roomOrder.push(key); }
+            byRoom[key].push(r);
+          });
+          const renderIndexCell = (curr, prev) => (
+            <>
+              {curr}
+              {prev !== null && prev !== undefined && <span className="f-mono" style={{ color: T.inkSoft }}>/{prev}</span>}
+            </>
+          );
           return (
             <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
               <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
                 <Building2 size={14} style={{ color: T.amber }} />
                 <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
-                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} bản ghi)</span>
+                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({roomOrder.length} phòng)</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
@@ -4267,9 +4288,9 @@ function UtilitiesTab({ perm, user }) {
                     <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.greenDark || T.green, color: T.paper }}>
                       <th className="text-center px-3 py-2">Phòng</th>
                       <th className="text-center px-3 py-2">Tháng</th>
-                      <th className="text-center px-3 py-2">Chỉ số điện</th>
+                      <th className="text-center px-3 py-2">Chỉ số điện<br /><span className="normal-case font-normal" style={{ opacity: 0.75 }}>(mới/cũ)</span></th>
                       <th className="text-center px-3 py-2">Điện tiêu thụ</th>
-                      <th className="text-center px-3 py-2">Chỉ số nước</th>
+                      <th className="text-center px-3 py-2">Chỉ số nước<br /><span className="normal-case font-normal" style={{ opacity: 0.75 }}>(mới/cũ)</span></th>
                       <th className="text-center px-3 py-2">Nước tiêu thụ</th>
                       <th className="text-center px-3 py-2">Vượt định mức điện</th>
                       <th className="text-center px-3 py-2">Vượt định mức nước</th>
@@ -4277,32 +4298,85 @@ function UtilitiesTab({ perm, user }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {list.map((r, i) => {
-                      const room = rooms.find((x) => x.id === r.roomId);
-                      const over = overQuotaOf(r, r.roomId);
+                    {roomOrder.map((key, i) => {
+                      const roomRecords = byRoom[key];
+                      const latest = roomRecords[0];
+                      const history = roomRecords.slice(1);
+                      const room = rooms.find((x) => x.id === latest.roomId);
+                      const over = overQuotaOf(latest, latest.roomId);
+                      const expanded = !!expandedRooms[key];
                       return (
-                        <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                          <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
-                          <td className="text-center px-3 py-2 f-mono">{formatMonth(r.month)}</td>
-                          <td className="text-center px-3 py-2 f-mono">{r.electricityIndex}</td>
-                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
-                          <td className="text-center px-3 py-2 f-mono">{r.waterIndex}</td>
-                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
-                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.elecOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.elecAllow} kWh (${over.occ} người)`}>
-                            {over.elecOver === null ? "—" : over.elecOver > 0 ? `+${over.elecOver} kWh` : "Trong định mức"}
-                          </td>
-                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.waterOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.waterAllow} m³ (${over.occ} người)`}>
-                            {over.waterOver === null ? "—" : over.waterOver > 0 ? `+${over.waterOver} m³` : "Trong định mức"}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            {perm.canMaintain && (
-                              <div className="flex items-center justify-center gap-2">
-                                <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                                <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
+                        <React.Fragment key={key}>
+                          <tr style={{ background: i % 2 ? T.paper : "#fff" }}>
+                            <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
+                            <td className="text-center px-3 py-2">
+                              {history.length > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRoomHistory(key)}
+                                  className="f-mono inline-flex items-center gap-1 underline underline-offset-2"
+                                  style={{ color: T.green }}
+                                  title="Bấm để xem các tháng đã qua"
+                                >
+                                  {formatMonth(latest.month)}
+                                  <ChevronRight size={11} style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s ease" }} />
+                                </button>
+                              ) : (
+                                <span className="f-mono">{formatMonth(latest.month)}</span>
+                              )}
+                              {history.length > 0 && (
+                                <div className="f-mono text-[9.5px]" style={{ color: T.inkSoft }}>
+                                  {expanded ? "đang hiện" : `+${history.length} tháng trước`}
+                                </div>
+                              )}
+                            </td>
+                            <td className="text-center px-3 py-2 f-mono">{renderIndexCell(latest.electricityIndex, latest.prevElectricityIndex)}</td>
+                            <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{latest.elecUsage === null ? "—" : latest.elecUsage}</td>
+                            <td className="text-center px-3 py-2 f-mono">{renderIndexCell(latest.waterIndex, latest.prevWaterIndex)}</td>
+                            <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{latest.waterUsage === null ? "—" : latest.waterUsage}</td>
+                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.elecOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.elecAllow} kWh (${over.occ} người)`}>
+                              {over.elecOver === null ? "—" : over.elecOver > 0 ? `+${over.elecOver} kWh` : "Trong định mức"}
+                            </td>
+                            <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.waterOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.waterAllow} m³ (${over.occ} người)`}>
+                              {over.waterOver === null ? "—" : over.waterOver > 0 ? `+${over.waterOver} m³` : "Trong định mức"}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {perm.canMaintain && (
+                                <div className="flex items-center justify-center gap-2">
+                                  <button onClick={() => startEdit(latest)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                                  <button onClick={() => remove(latest.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                          {expanded && history.map((r) => {
+                            const hOver = overQuotaOf(r, r.roomId);
+                            return (
+                              <tr key={r.id} style={{ background: T.selectBg, opacity: 0.85 }}>
+                                <td className="text-center px-3 py-2 f-mono text-[11px]" style={{ color: T.inkSoft }}>↳ tháng trước</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px]">{formatMonth(r.month)}</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px]">{renderIndexCell(r.electricityIndex, r.prevElectricityIndex)}</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px]" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px]">{renderIndexCell(r.waterIndex, r.prevWaterIndex)}</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px]" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px] font-semibold" style={{ color: hOver.elecOver > 0 ? T.red : T.green }}>
+                                  {hOver.elecOver === null ? "—" : hOver.elecOver > 0 ? `+${hOver.elecOver} kWh` : "Trong định mức"}
+                                </td>
+                                <td className="text-center px-3 py-2 f-mono text-[12px] font-semibold" style={{ color: hOver.waterOver > 0 ? T.red : T.green }}>
+                                  {hOver.waterOver === null ? "—" : hOver.waterOver > 0 ? `+${hOver.waterOver} m³` : "Trong định mức"}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {perm.canMaintain && (
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                                      <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
