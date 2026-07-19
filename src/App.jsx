@@ -40,6 +40,8 @@ function withSelect(style, selected) {
 const KTX_PASSWORD_DEFAULT = "KTXCSND"; // Mật khẩu chung mặc định — đổi được ở mục "Đổi mật khẩu"
 const MANAGER_PASSWORD_DEFAULT = "KTXCANBO"; // Mật khẩu quản lý ký túc xá mặc định — đổi được ở mục "Đổi mật khẩu"
 const ADMIN_PASSWORD_DEFAULT = "KTXADMIN"; // Mật khẩu quản trị mặc định — đổi được ở mục "Đổi mật khẩu"
+const RECOVERY_CODE_DEFAULT = "KTXKHOIPHUC01"; // Mã khôi phục mặc định — dùng để tự đặt lại cả 3 mật khẩu khi quên,
+                                                 // Quản trị nên đổi mã này ngay sau lần đăng nhập đầu và giữ kín, tách biệt với 3 mật khẩu trên.
 const DATA_NS = "ktxcsnd"; // Tên collection Firestore riêng cho trang Ký túc xá (không lẫn dữ liệu khác)
 
 /* ============ PHÂN QUYỀN ============
@@ -394,7 +396,7 @@ function useSingleDoc(key, defaultValue) {
 }
 
 function useAuthConfig() {
-  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, managerPassword: MANAGER_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT });
+  const [config, setConfigState] = useState({ unitPassword: KTX_PASSWORD_DEFAULT, managerPassword: MANAGER_PASSWORD_DEFAULT, adminPassword: ADMIN_PASSWORD_DEFAULT, recoveryCode: RECOVERY_CODE_DEFAULT });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -409,6 +411,7 @@ function useAuthConfig() {
               unitPassword: parsed.unitPassword || KTX_PASSWORD_DEFAULT,
               managerPassword: parsed.managerPassword || MANAGER_PASSWORD_DEFAULT,
               adminPassword: parsed.adminPassword || ADMIN_PASSWORD_DEFAULT,
+              recoveryCode: parsed.recoveryCode || RECOVERY_CODE_DEFAULT,
             });
           } catch (e) {
             // giữ mặc định nếu dữ liệu lỗi
@@ -634,7 +637,16 @@ function LoginGate({ onLogin }) {
   const [pw, setPw] = useState("");
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
-  const { config } = useAuthConfig();
+  const { config, setConfig } = useAuthConfig();
+
+  const [showForgot, setShowForgot] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState("");
+  const [newUnitPw, setNewUnitPw] = useState("");
+  const [newManagerPw, setNewManagerPw] = useState("");
+  const [newAdminPw, setNewAdminPw] = useState("");
+  const [forgotErr, setForgotErr] = useState("");
+  const [forgotMsg, setForgotMsg] = useState("");
+  const [forgotSaving, setForgotSaving] = useState(false);
 
   const submit = (e) => {
     e.preventDefault();
@@ -657,12 +669,44 @@ function LoginGate({ onLogin }) {
     onLogin(name.trim(), null);
   };
 
+  // Đặt lại cả 3 mật khẩu (Học viên / Quản lý / Quản trị) khi quên hết — chỉ cần đúng Mã khôi phục do
+  // Quản trị viên tự đặt riêng từ trước (mục "Đổi mật khẩu"), không cần đăng nhập trước đó.
+  const submitForgot = async (e) => {
+    e.preventDefault();
+    setForgotErr("");
+    setForgotMsg("");
+    if (!recoveryInput.trim()) {
+      setForgotErr("Vui lòng nhập Mã khôi phục.");
+      return;
+    }
+    if (recoveryInput.trim() !== config.recoveryCode) {
+      setForgotErr("Mã khôi phục không đúng. Nếu bạn không giữ mã này, vui lòng liên hệ trực tiếp bộ phận Kỹ thuật / người phụ trách hệ thống để được cấp lại.");
+      return;
+    }
+    if (!newUnitPw.trim() || !newManagerPw.trim() || !newAdminPw.trim()) {
+      setForgotErr("Vui lòng nhập đủ cả 3 mật khẩu mới trước khi lưu.");
+      return;
+    }
+    setForgotSaving(true);
+    const ok = await setConfig({
+      unitPassword: newUnitPw.trim(),
+      managerPassword: newManagerPw.trim(),
+      adminPassword: newAdminPw.trim(),
+      recoveryCode: config.recoveryCode,
+    });
+    setForgotSaving(false);
+    if (!ok) { setForgotErr("Lưu thất bại, thử lại nhé."); return; }
+    setForgotMsg("Đã đặt lại cả 3 mật khẩu thành công. Bạn có thể đăng nhập ngay bằng mật khẩu mới.");
+    setNewUnitPw(""); setNewManagerPw(""); setNewAdminPw(""); setRecoveryInput("");
+    setTimeout(() => { setShowForgot(false); setForgotMsg(""); }, 3000);
+  };
+
   return (
     <div className="min-h-screen paper-tex flex items-center justify-center px-4 py-10">
       <style>{FONT_STYLE}</style>
       <ErrorBanner />
       <form
-        onSubmit={submit}
+        onSubmit={showForgot ? submitForgot : submit}
         className="relative w-full max-w-md overflow-hidden card-sheet"
         style={{ background: "#fff", border: `1px solid ${T.paperDark}` }}
       >
@@ -696,34 +740,97 @@ function LoginGate({ onLogin }) {
               <span style={{ width: 5, height: 5, transform: "rotate(45deg)", background: T.gold }} />
               <span style={{ width: 24, height: 1, background: T.gold }} />
             </div>
-            <div className="f-body text-xs" style={{ color: T.inkSoft }}>Cổng truy cập nội bộ ký túc xá</div>
+            <div className="f-body text-xs" style={{ color: T.inkSoft }}>
+              {showForgot ? "Đặt lại mật khẩu bằng Mã khôi phục" : "Cổng truy cập nội bộ ký túc xá"}
+            </div>
           </div>
 
-          <div className="relative">
-            <Field label="Họ và tên" required>
-              <input className={inputCls} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
-            </Field>
-            <Field label="Mật khẩu (chung ký túc xá hoặc quản trị)">
-              <input type="password" className={inputCls} style={inputStyle} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
-            </Field>
+          {!showForgot ? (
+            <div className="relative">
+              <Field label="Họ và tên" required>
+                <input className={inputCls} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
+              </Field>
+              <Field label="Mật khẩu (chung ký túc xá hoặc quản trị)">
+                <input type="password" className={inputCls} style={inputStyle} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
+              </Field>
 
-            {err && (
-              <div className="f-body text-xs mb-3 px-3 py-2 flex items-start gap-2" style={{ color: T.red, background: "#F7E3E6", borderLeft: `3px solid ${T.red}` }}>
-                {err}
-              </div>
-            )}
+              {err && (
+                <div className="f-body text-xs mb-3 px-3 py-2 flex items-start gap-2" style={{ color: T.red, background: "#F7E3E6", borderLeft: `3px solid ${T.red}` }}>
+                  {err}
+                </div>
+              )}
 
-            <button
-              type="submit"
-              className="f-display w-full py-2.5 tracking-wide uppercase text-sm btn-press"
-              style={{ background: T.green, color: T.paper, boxShadow: "0 2px 6px rgba(19,31,25,0.3)" }}
-            >
-              Vào trang quản lý
-            </button>
-            <p className="f-body text-[11px] mt-4 text-center" style={{ color: T.inkSoft }}>
-              Dữ liệu trên trang này dùng chung cho toàn ký túc xá. Quyền thêm/xoá/sửa nội dung tuỳ theo vai trò được quản trị gán.
-            </p>
-          </div>
+              <button
+                type="submit"
+                className="f-display w-full py-2.5 tracking-wide uppercase text-sm btn-press"
+                style={{ background: T.green, color: T.paper, boxShadow: "0 2px 6px rgba(19,31,25,0.3)" }}
+              >
+                Vào trang quản lý
+              </button>
+              <p className="f-body text-[11px] mt-4 text-center" style={{ color: T.inkSoft }}>
+                Dữ liệu trên trang này dùng chung cho toàn ký túc xá. Quyền thêm/xoá/sửa nội dung tuỳ theo vai trò được quản trị gán.
+              </p>
+              <p className="f-body text-xs mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => { setShowForgot(true); setErr(""); setForgotErr(""); setForgotMsg(""); }}
+                  className="underline"
+                  style={{ color: T.amberDark }}
+                >
+                  Quên mật khẩu?
+                </button>
+              </p>
+            </div>
+          ) : (
+            <div className="relative">
+              <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+                Nhập <b>Mã khôi phục</b> (do Quản trị viên đặt riêng, khác 3 mật khẩu đăng nhập) để tự đặt lại toàn bộ mật khẩu Học viên,
+                Quản lý ký túc xá và Quản trị. Nếu không có mã này, vui lòng liên hệ trực tiếp bộ phận Kỹ thuật / người phụ trách hệ thống để được cấp lại.
+              </p>
+              <Field label="Mã khôi phục" required>
+                <PasswordInput value={recoveryInput} onChange={(e) => setRecoveryInput(e.target.value)} placeholder="Nhập mã khôi phục" />
+              </Field>
+              <Field label="Mật khẩu chung ký túc xá — mới" required>
+                <PasswordInput value={newUnitPw} onChange={(e) => setNewUnitPw(e.target.value)} />
+              </Field>
+              <Field label="Mật khẩu quản lý ký túc xá — mới" required>
+                <PasswordInput value={newManagerPw} onChange={(e) => setNewManagerPw(e.target.value)} />
+              </Field>
+              <Field label="Mật khẩu quản trị — mới" required>
+                <PasswordInput value={newAdminPw} onChange={(e) => setNewAdminPw(e.target.value)} />
+              </Field>
+
+              {forgotErr && (
+                <div className="f-body text-xs mb-3 px-3 py-2 flex items-start gap-2" style={{ color: T.red, background: "#F7E3E6", borderLeft: `3px solid ${T.red}` }}>
+                  {forgotErr}
+                </div>
+              )}
+              {forgotMsg && (
+                <div className="f-body text-xs mb-3 px-3 py-2" style={{ color: T.green, background: "#E5F0E7", borderLeft: `3px solid ${T.green}` }}>
+                  {forgotMsg}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={forgotSaving}
+                className="f-display w-full py-2.5 tracking-wide uppercase text-sm btn-press"
+                style={{ background: T.green, color: T.paper, boxShadow: "0 2px 6px rgba(19,31,25,0.3)" }}
+              >
+                {forgotSaving ? "Đang lưu…" : "Đặt lại mật khẩu"}
+              </button>
+              <p className="f-body text-xs mt-3 text-center">
+                <button
+                  type="button"
+                  onClick={() => { setShowForgot(false); setForgotErr(""); setForgotMsg(""); }}
+                  className="underline"
+                  style={{ color: T.inkSoft }}
+                >
+                  ← Quay lại đăng nhập
+                </button>
+              </p>
+            </div>
+          )}
         </div>
       </form>
     </div>
@@ -4876,6 +4983,7 @@ function PasswordTab({ user, perm }) {
   const [unitPw, setUnitPw] = useState("");
   const [managerPw, setManagerPw] = useState("");
   const [adminPw, setAdminPw] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [warn, setWarn] = useState("");
@@ -4884,15 +4992,16 @@ function PasswordTab({ user, perm }) {
     setUnitPw(config.unitPassword);
     setManagerPw(config.managerPassword);
     setAdminPw(config.adminPassword);
-  }, [config.unitPassword, config.managerPassword, config.adminPassword]);
+    setRecoveryCode(config.recoveryCode);
+  }, [config.unitPassword, config.managerPassword, config.adminPassword, config.recoveryCode]);
 
   // Cán bộ quản lý (can_bo) chỉ được xem/đổi mật khẩu Học viên và mật khẩu Quản lý ký túc xá của chính mình —
-  // KHÔNG được xem hay đổi mật khẩu Quản trị. Chỉ tài khoản Quản trị mới toàn quyền với cả 3 mật khẩu.
+  // KHÔNG được xem hay đổi mật khẩu Quản trị, cũng không thấy Mã khôi phục. Chỉ tài khoản Quản trị mới toàn quyền.
   const saveAdmin = async () => {
-    if (!unitPw.trim() || !managerPw.trim() || (perm.isAdmin && !adminPw.trim())) {
+    if (!unitPw.trim() || !managerPw.trim() || (perm.isAdmin && (!adminPw.trim() || !recoveryCode.trim()))) {
       setWarn(
         perm.isAdmin
-          ? "Vui lòng nhập đủ cả 3 mật khẩu (Chung ký túc xá, Quản lý ký túc xá, Quản trị) trước khi lưu."
+          ? "Vui lòng nhập đủ cả 3 mật khẩu và Mã khôi phục trước khi lưu."
           : "Vui lòng nhập đủ Mật khẩu chung ký túc xá và Mật khẩu quản lý ký túc xá trước khi lưu."
       );
       return;
@@ -4903,6 +5012,7 @@ function PasswordTab({ user, perm }) {
       unitPassword: unitPw.trim(),
       managerPassword: managerPw.trim(),
       adminPassword: perm.isAdmin ? adminPw.trim() : config.adminPassword,
+      recoveryCode: perm.isAdmin ? recoveryCode.trim() : config.recoveryCode,
     });
     setSaving(false);
     setStatus(ok ? "Đã lưu mật khẩu mới. Áp dụng ngay từ lần đăng nhập tiếp theo." : "Lưu thất bại, thử lại nhé.");
@@ -4927,9 +5037,18 @@ function PasswordTab({ user, perm }) {
             <PasswordInput value={managerPw} onChange={(e) => setManagerPw(e.target.value)} />
           </Field>
           {perm.isAdmin && (
-            <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
-              <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
-            </Field>
+            <>
+              <Field label="Mật khẩu quản trị (đăng nhập được toàn quyền)" required>
+                <PasswordInput value={adminPw} onChange={(e) => setAdminPw(e.target.value)} />
+              </Field>
+              <Field label="Mã khôi phục (dùng ở màn hình đăng nhập khi quên mật khẩu — giữ kín, khác 3 mật khẩu trên)" required>
+                <PasswordInput value={recoveryCode} onChange={(e) => setRecoveryCode(e.target.value)} />
+              </Field>
+              <p className="f-body text-[11px] mb-4 -mt-2" style={{ color: T.inkSoft }}>
+                Ai biết Mã khôi phục này đều có thể tự đặt lại cả 3 mật khẩu ở màn hình đăng nhập (mục "Quên mật khẩu?") mà không cần đăng nhập trước —
+                chỉ chia sẻ cho người thực sự tin cậy (VD: Trưởng ban quản lý ký túc xá), và nên đổi mã này định kỳ.
+              </p>
+            </>
           )}
           <Btn onClick={saveAdmin} disabled={saving}>{saving ? "Đang lưu…" : "Lưu mật khẩu"}</Btn>
           {status && <div className="f-body text-xs mt-3" style={{ color: T.green }}>{status}</div>}
