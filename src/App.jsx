@@ -995,7 +995,9 @@ function StudentImportPanel({ existingItems, onConfirm, onClose }) {
     if (words.length < 2 || words.length > 6) return false; // họ tên tiếng Việt thường 2–6 từ
     const bannedPhrases = /danh\s*sách|cập\s*nhật|trang\s*web|blog|cán\s*bộ|đảng\s*viên|họ\s*và\s*tên|họ\s*tên|ghi\s*chú|biểu\s*mẫu|báo\s*cáo|thống\s*kê|hướng\s*dẫn|quy\s*định|thông\s*báo|danh\s*mục/i;
     if (bannedPhrases.test(s)) return false; // loại các cụm từ khoá thường gặp trong tiêu đề/mô tả
-    return words.every((w) => w[0] === w[0].toUpperCase()); // mỗi từ trong tên phải viết hoa chữ cái đầu
+    // Không bắt buộc viết hoa từng chữ cái đầu — dữ liệu từ file/OCR có thể viết hoa/thường lẫn lộn
+    // (VD: "Nguyễn minh thuận" vẫn là tên thật), chỉ cần không chứa ký tự lạ và số từ hợp lý là đủ.
+    return /^[a-zA-ZÀ-ỹà-ỹ\s]+$/.test(s);
   };
 
   useEffect(() => {
