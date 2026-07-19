@@ -1357,10 +1357,46 @@ function DashboardTab({ perm, onNavigate }) {
         .sort((a, b) => naturalCompare(a.room.area || "", b.room.area || "") || naturalCompare(String(a.room.roomNumber || ""), String(b.room.roomNumber || "")))
     : [];
 
+  // Vai trò Kỹ thuật chỉ quản lý Tài sản & thiết bị + Bảo trì, nên ở Tổng quan chỉ cho xem đúng khối
+  // "Bảo trì & tài sản" — không hiện số liệu phòng/sinh viên vốn ngoài phạm vi quyền hạn của họ.
+  const isTechOnly = perm.role === "ky_thuat";
+
   return (
     <div>
       <SectionHeader icon={LayoutGrid} eyebrow="Tổng quan" title="Bảng điều khiển ký túc xá" />
-      {loading ? <LoadingRow /> : (
+      {loading ? <LoadingRow /> : isTechOnly ? (
+        <div className="stamp-border p-4 max-w-xl" style={{ background: "#fff" }}>
+          <div className="f-display text-sm uppercase tracking-wider mb-3" style={{ color: T.amberDark }}>Bảo trì & tài sản</div>
+
+          <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.green, borderBottom: `1.5px solid ${T.green}` }}>Yêu cầu sửa chữa</div>
+          <div className="space-y-1 mb-3">
+            {MAINT_STATUS.map((s) => (
+              <div key={s} className="flex items-center justify-between f-body text-sm">
+                <span style={{ color: T.ink }}>{s}</span>
+                <span className="f-mono font-semibold" style={{ color: s === "Chờ xử lý" ? T.red : s === "Đang xử lý" ? T.amberDark : T.green }}>{maintByStatus[s] || 0}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+              <span style={{ color: T.inkSoft }}>Tổng số yêu cầu đã ghi nhận</span>
+              <span className="f-mono font-semibold" style={{ color: T.green }}>{maint.length}</span>
+            </div>
+          </div>
+
+          <div className="f-mono text-[11px] font-bold uppercase tracking-widest mb-1.5 pb-1" style={{ color: T.amberDark, borderBottom: `1.5px solid ${T.amberDark}` }}>Tài sản</div>
+          <div className="space-y-1">
+            {ASSET_STATUS.map((s) => (
+              <div key={s} className="flex items-center justify-between f-body text-sm">
+                <span style={{ color: T.ink }}>{s}</span>
+                <span className="f-mono font-semibold" style={{ color: s === "Hỏng" ? T.red : s === "Đang sửa" ? T.amberDark : T.green }}>{assetByStatus[s] || 0}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between f-body text-sm pt-1" style={{ borderTop: `1px dashed ${T.paperDark}` }}>
+              <span style={{ color: T.inkSoft }}>Tổng số tài sản</span>
+              <span className="f-mono font-semibold" style={{ color: T.green }}>{assets.length}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {isAllowed("students") && <StatCard icon={Users} label="Tổng số học viên" value={totalStudents} onClick={goIfAllowed("students")} />}
@@ -5235,6 +5271,9 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
   const [nameInput, setNameInput] = useState("");
   const [roleInput, setRoleInput] = useState("can_bo");
   const [warn, setWarn] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editWarn, setEditWarn] = useState("");
 
   const grant = async () => {
     const nm = nameInput.trim();
@@ -5247,6 +5286,20 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
   const revoke = async (id) => setPermissions(permissions.filter((p) => p.id !== id));
   const [selectedId, setSelectedId] = useState(null);
   const toggleSelect = (id) => setSelectedId((s) => (s === id ? null : id));
+
+  const startEdit = (p) => { setEditingId(p.id); setEditForm({ name: p.name, role: p.role }); setEditWarn(""); };
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditWarn(""); };
+  const saveEdit = async () => {
+    const nm = (editForm.name || "").trim();
+    if (!nm) { setEditWarn("Vui lòng nhập Họ và tên."); return; }
+    if (permissions.some((p) => p.id !== editingId && normalizeName(p.name) === normalizeName(nm))) {
+      setEditWarn("Đã có người khác được gán quyền với tên này. Hãy gỡ quyền của người trùng tên trước, hoặc nhập tên đầy đủ hơn để phân biệt.");
+      return;
+    }
+    setEditWarn("");
+    await setPermissions(permissions.map((p) => (p.id === editingId ? { ...p, name: nm, role: editForm.role } : p)));
+    cancelEdit();
+  };
 
   const roleLabel = { can_bo: "Cán bộ quản lý ký túc xá (toàn quyền thêm/sửa/xoá)", ky_thuat: "Kỹ thuật (quản lý Tài sản & Bảo trì)", sinh_vien: "Học viên (chỉ gửi yêu cầu, tự xoá yêu cầu của mình)" };
 
@@ -5293,11 +5346,37 @@ function PermissionsTab({ permissions, setPermissions, permLoading }) {
             </thead>
             <tbody>
               {permissions.map((p, i) => (
-                <tr key={p.id} onClick={() => toggleSelect(p.id)} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === p.id)}>
-                  <td className="px-3 py-2 font-medium">{p.name}</td>
-                  <td className="px-3 py-2">{roleLabel[p.role] || p.role}</td>
-                  <td className="px-3 py-2 text-right"><button onClick={() => revoke(p.id)} title="Gỡ quyền (về Sinh viên mặc định)"><Trash2 size={14} style={{ color: T.red }} /></button></td>
-                </tr>
+                editingId === p.id ? (
+                  <tr key={p.id} style={{ background: T.selectBg, boxShadow: `inset 0 0 0 2px ${T.selectBorder}` }}>
+                    <td className="px-3 py-2" colSpan={3}>
+                      <div className="mb-2"><FormWarning message={editWarn} /></div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                        <Field label="Họ và tên" required>
+                          <input list="student-names" className={inputCls} style={inputStyle} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                        </Field>
+                        <Field label="Vai trò">
+                          <select className={inputCls} style={inputStyle} value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
+                            <option value="can_bo">Cán bộ quản lý ký túc xá</option>
+                            <option value="ky_thuat">Kỹ thuật</option>
+                            <option value="sinh_vien">Học viên</option>
+                          </select>
+                        </Field>
+                        <div className="flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={p.id} onClick={() => toggleSelect(p.id)} className="cursor-pointer" style={withSelect({ background: i % 2 ? T.paper : "#fff" }, selectedId === p.id)}>
+                    <td className="px-3 py-2 font-medium">{p.name}</td>
+                    <td className="px-3 py-2">{roleLabel[p.role] || p.role}</td>
+                    <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => startEdit(p)} title="Sửa"><Pencil size={14} style={{ color: T.green }} /></button>
+                        <button onClick={() => revoke(p.id)} title="Gỡ quyền (về Sinh viên mặc định)"><Trash2 size={14} style={{ color: T.red }} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                )
               ))}
             </tbody>
           </table>
@@ -5330,16 +5409,16 @@ const TABS = [
 // không bấm vào được vì không còn trong danh sách vai trò của tab "rooms".
 const TAB_ROLES = {
   home: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  rooms: ["admin", "can_bo", "ky_thuat"],
+  rooms: ["admin", "can_bo"],
   students: ["admin", "can_bo"],
   assignment: ["admin", "can_bo"],
   roster: ["admin", "can_bo"],
   assets: ["admin", "can_bo", "ky_thuat"],
   maintenance: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  utilities: ["admin", "can_bo", "ky_thuat"],
+  utilities: ["admin", "can_bo"],
   inspections: ["admin", "can_bo"],
-  notifications: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
-  docs: ["admin", "can_bo", "ky_thuat", "sinh_vien"],
+  notifications: ["admin", "can_bo", "sinh_vien"],
+  docs: ["admin", "can_bo", "sinh_vien"],
 };
 
 export default function App() {
