@@ -3637,6 +3637,9 @@ function MaintenanceTab({ perm, user }) {
 function UtilitiesTab({ perm, user }) {
   const { items: records, setItems: setRecords, loading } = useSharedList("utilities");
   const { items: rooms } = useSharedList("rooms");
+  const { items: students } = useSharedList("students");
+  const { value: quota, setValue: setQuota, loading: quotaLoading } = useSingleDoc("utilityQuota", { elecPerPerson: 50, waterPerPerson: 4 });
+  const [quotaDraft, setQuotaDraft] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const blank = { roomId: "", month: new Date().toISOString().slice(0, 7), electricityIndex: "", waterIndex: "" };
   const [form, setForm] = useState(blank);
@@ -3652,6 +3655,26 @@ function UtilitiesTab({ perm, user }) {
   const [editWarn, setEditWarn] = useState("");
   const [showMissing, setShowMissing] = useState(false);
 
+  // Số người đang thực ở trong từng phòng (để tính định mức điện/nước miễn phí theo đầu người).
+  const occCountOf = (roomId) => students.filter((s) => String(s.roomId) === String(roomId) && s.status !== "Đã trả phòng").length;
+  // Vượt định mức = mức tiêu thụ thực tế trừ đi định mức miễn phí (định mức/người x số người đang ở) — âm thì coi như 0.
+  const overQuotaOf = (rec, roomId) => {
+    const occ = occCountOf(roomId);
+    const elecAllow = occ * (Number(quota.elecPerPerson) || 0);
+    const waterAllow = occ * (Number(quota.waterPerPerson) || 0);
+    return {
+      occ,
+      elecAllow,
+      waterAllow,
+      elecOver: rec.elecUsage === null ? null : Math.max(rec.elecUsage - elecAllow, 0),
+      waterOver: rec.waterUsage === null ? null : Math.max(rec.waterUsage - waterAllow, 0),
+    };
+  };
+  const saveQuota = async () => {
+    await setQuota({ elecPerPerson: Number(quotaDraft.elecPerPerson) || 0, waterPerPerson: Number(quotaDraft.waterPerPerson) || 0 });
+    setQuotaDraft(null);
+  };
+
   // Danh mục toà/tầng để lọc nhanh khi số phòng lên tới hàng trăm/nghìn — cùng cách làm với tab Sinh viên nội trú.
   const buildingOptions = [...new Set(rooms.map((r) => r.building).filter(Boolean))].sort(naturalCompare);
   const areaOptions = [...new Set(rooms.filter((r) => !filterBuilding || r.building === filterBuilding).map((r) => r.area).filter(Boolean))].sort(naturalCompare);
@@ -3659,6 +3682,7 @@ function UtilitiesTab({ perm, user }) {
   // Gom theo toà nhà để hiện dạng optgroup trong select — dễ tìm phòng khi danh sách rất dài.
   const roomGroups = buildingOptions.map((b) => ({ building: b, rooms: roomsSorted.filter((r) => (r.building || "") === b) }));
   const roomsNoBuilding = roomsSorted.filter((r) => !r.building);
+
 
   const submit = async () => {
     if (!form.roomId || !form.month) { setWarn("Vui lòng chọn Phòng và Tháng trước khi lưu."); return; }
@@ -3821,6 +3845,38 @@ function UtilitiesTab({ perm, user }) {
       <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
         Nhập chỉ số điện - nước hàng tháng theo từng phòng. Hệ thống tự tính mức tiêu thụ so với tháng liền trước.
       </p>
+
+      <div className="stamp-border p-4 mb-5" style={{ background: "#fff" }}>
+        <div className="f-display text-sm uppercase tracking-wider mb-2" style={{ color: T.amberDark }}>Định mức điện - nước miễn phí theo đầu người</div>
+        <p className="f-body text-xs mb-2" style={{ color: T.inkSoft }}>
+          Mỗi người đang ở trong phòng được cấp 1 định mức điện/nước miễn phí mỗi tháng. Định mức của cả phòng = định mức/người × số người đang ở thực tế. Tiêu thụ vượt định mức đó là phần học viên phải tự chi trả.
+        </p>
+        {quotaLoading ? (
+          <div className="f-body text-xs italic" style={{ color: T.inkSoft }}>Đang tải…</div>
+        ) : quotaDraft ? (
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Định mức điện / người (kWh)">
+              <input type="number" className={inputCls} style={{ ...inputStyle, width: 140 }} value={quotaDraft.elecPerPerson} onChange={(e) => setQuotaDraft({ ...quotaDraft, elecPerPerson: e.target.value })} />
+            </Field>
+            <Field label="Định mức nước / người (m³)">
+              <input type="number" className={inputCls} style={{ ...inputStyle, width: 140 }} value={quotaDraft.waterPerPerson} onChange={(e) => setQuotaDraft({ ...quotaDraft, waterPerPerson: e.target.value })} />
+            </Field>
+            <Btn size="sm" onClick={saveQuota}>Lưu định mức</Btn>
+            <Btn size="sm" variant="outline" onClick={() => setQuotaDraft(null)}>Huỷ</Btn>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="f-body text-sm" style={{ color: T.ink }}>
+              Điện: <b className="f-mono" style={{ color: T.green }}>{quota.elecPerPerson}</b> kWh/người · Nước: <b className="f-mono" style={{ color: T.green }}>{quota.waterPerPerson}</b> m³/người
+            </span>
+            {perm.canMaintain && (
+              <button onClick={() => setQuotaDraft({ elecPerPerson: quota.elecPerPerson, waterPerPerson: quota.waterPerPerson })} title="Sửa định mức">
+                <Pencil size={13} style={{ color: T.green }} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {perm.canMaintain && showForm && (
         <div className="stamp-border p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ background: "#fff" }}>
@@ -4001,6 +4057,18 @@ function UtilitiesTab({ perm, user }) {
                                     <div className="f-body text-xs mt-2 space-y-0.5" style={{ color: T.ink }}>
                                       <div>Điện: <b className="f-mono">{rec.electricityIndex}</b>{rec.elecUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.elecUsage} kWh)</span>}</div>
                                       <div>Nước: <b className="f-mono">{rec.waterIndex}</b>{rec.waterUsage !== null && <span className="f-mono" style={{ color: T.amberDark }}> ({rec.waterUsage} m³)</span>}</div>
+                                      {(() => {
+                                        const over = overQuotaOf(rec, r.id);
+                                        if (over.elecOver === null && over.waterOver === null) return null;
+                                        const isOver = over.elecOver > 0 || over.waterOver > 0;
+                                        return (
+                                          <div className="f-mono font-semibold pt-0.5" style={{ color: isOver ? T.red : T.green }}>
+                                            {isOver
+                                              ? `Vượt định mức: ${over.elecOver > 0 ? `+${over.elecOver} kWh điện` : ""}${over.elecOver > 0 && over.waterOver > 0 ? ", " : ""}${over.waterOver > 0 ? `+${over.waterOver} m³ nước` : ""}`
+                                              : `Trong định mức (${over.occ} người)`}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   ) : (
                                     <button
@@ -4079,12 +4147,15 @@ function UtilitiesTab({ perm, user }) {
                       <th className="text-center px-3 py-2">Điện tiêu thụ</th>
                       <th className="text-center px-3 py-2">Chỉ số nước</th>
                       <th className="text-center px-3 py-2">Nước tiêu thụ</th>
+                      <th className="text-center px-3 py-2">Vượt định mức điện</th>
+                      <th className="text-center px-3 py-2">Vượt định mức nước</th>
                       <th className="px-3 py-2 w-20"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {list.map((r, i) => {
                       const room = rooms.find((x) => x.id === r.roomId);
+                      const over = overQuotaOf(r, r.roomId);
                       return (
                         <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
                           <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
@@ -4093,6 +4164,12 @@ function UtilitiesTab({ perm, user }) {
                           <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
                           <td className="text-center px-3 py-2 f-mono">{r.waterIndex}</td>
                           <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
+                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.elecOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.elecAllow} kWh (${over.occ} người)`}>
+                            {over.elecOver === null ? "—" : over.elecOver > 0 ? `+${over.elecOver} kWh` : "Trong định mức"}
+                          </td>
+                          <td className="text-center px-3 py-2 f-mono font-semibold" style={{ color: over.waterOver > 0 ? T.red : T.green }} title={`Định mức phòng: ${over.waterAllow} m³ (${over.occ} người)`}>
+                            {over.waterOver === null ? "—" : over.waterOver > 0 ? `+${over.waterOver} m³` : "Trong định mức"}
+                          </td>
                           <td className="px-3 py-2 text-center">
                             {perm.canMaintain && (
                               <div className="flex items-center justify-center gap-2">
@@ -4185,7 +4262,7 @@ function DocsTab({ user, perm }) {
 }
 
 /* ============ SAO LƯU & KHÔI PHỤC ============ */
-const ALL_DATA_KEYS = ["rooms", "students", "assets", "maintenance", "docs", "permissions", "authConfig", "managerInfo"];
+const ALL_DATA_KEYS = ["rooms", "students", "assets", "maintenance", "docs", "permissions", "authConfig", "managerInfo", "utilities", "utilityQuota"];
 const AUTO_BACKUP_INTERVALS = [
   { value: 0, label: "Tắt — không tự động" },
   { value: 1, label: "Hằng ngày" },
