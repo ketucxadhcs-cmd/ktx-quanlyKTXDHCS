@@ -1225,6 +1225,7 @@ function DashboardTab({ perm, onNavigate }) {
   const { items: assets, loading: assetsLoading } = useSharedList("assets");
 
   const loading = roomsLoading || studentsLoading || maintLoading || assetsLoading;
+  const [viewBuildingFree, setViewBuildingFree] = useState(null); // Toà đang xem chi tiết phòng/giường còn trống
 
   // Chỉ cho bấm/xem mục nào mà vai trò hiện tại thực sự được xem (dùng chung TAB_ROLES khai báo bên dưới).
   const isAllowed = (tabId) => (TAB_ROLES[tabId] || []).includes(perm.role);
@@ -1279,6 +1280,18 @@ function DashboardTab({ perm, onNavigate }) {
       maintenance: bRooms.filter((r) => effectiveRoomStatus(r, roomOccCount[r.id] || 0) === "Đang bảo trì").length,
     };
   });
+
+  const freeRoomsList = viewBuildingFree
+    ? rooms
+        .filter((r) => (r.building || "Chưa rõ") === viewBuildingFree)
+        .map((r) => {
+          const occ = roomOccCount[r.id] || 0;
+          const cap = Number(r.capacity) || 0;
+          return { room: r, occ, cap, free: Math.max(cap - occ, 0) };
+        })
+        .filter((x) => x.free > 0 && effectiveRoomStatus(x.room, x.occ) !== "Đang bảo trì")
+        .sort((a, b) => naturalCompare(a.room.area || "", b.room.area || "") || naturalCompare(String(a.room.roomNumber || ""), String(b.room.roomNumber || "")))
+    : [];
 
   return (
     <div>
@@ -1381,7 +1394,19 @@ function DashboardTab({ perm, onNavigate }) {
                         <td className="text-center px-3 py-2 f-mono">{b.roomCount}</td>
                         <td className="text-center px-3 py-2 f-mono">{b.capacity}</td>
                         <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{b.occupied}</td>
-                        <td className="text-center px-3 py-2 f-mono" style={{ color: T.green }}>{b.free}</td>
+                        <td className="text-center px-3 py-2 f-mono" style={{ color: T.green }}>
+                          {b.free > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewBuildingFree(b.building)}
+                              className="underline underline-offset-2 font-semibold btn-press"
+                              style={{ color: T.green }}
+                              title="Xem chi tiết phòng/giường còn trống"
+                            >
+                              {b.free}
+                            </button>
+                          ) : b.free}
+                        </td>
                         <td className="text-center px-3 py-2 f-mono" style={{ color: b.maintenance > 0 ? T.red : T.inkSoft }}>{b.maintenance}</td>
                       </tr>
                     ))}
@@ -1391,6 +1416,45 @@ function DashboardTab({ perm, onNavigate }) {
             )}
           </div>
         </>
+      )}
+
+      {viewBuildingFree && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(19,31,25,0.55)" }} onClick={() => setViewBuildingFree(null)}>
+          <div className="stamp-border p-5 w-full max-w-lg" style={{ background: "#fff", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="f-display text-sm uppercase tracking-wider" style={{ color: T.amberDark }}>
+                Giường còn trống — Toà {viewBuildingFree}
+              </div>
+              <button onClick={() => setViewBuildingFree(null)}><X size={16} style={{ color: T.inkSoft }} /></button>
+            </div>
+            {freeRoomsList.length === 0 ? (
+              <div className="f-body text-sm italic mt-3" style={{ color: T.inkSoft }}>Toà này hiện không còn giường trống nào.</div>
+            ) : (
+              <>
+                <div className="f-body text-xs mb-3" style={{ color: T.inkSoft }}>
+                  Tổng cộng còn <span className="font-semibold" style={{ color: T.green }}>{freeRoomsList.reduce((s, x) => s + x.free, 0)}</span> giường trống, ở {freeRoomsList.length} phòng.
+                </div>
+                <div className="space-y-1.5">
+                  {freeRoomsList.map(({ room, occ, cap, free }) => (
+                    <div key={room.id} className="flex items-center justify-between px-3 py-2 rounded-sm" style={{ background: "rgba(31,51,40,0.04)", border: `1px solid ${T.paperDark}` }}>
+                      <div>
+                        <div className="f-body text-sm font-medium" style={{ color: T.green }}>{roomLabel(room)}</div>
+                        <div className="f-mono text-[10px]" style={{ color: T.inkSoft }}>{room.area ? `${room.area} · ` : ""}{room.gender || "Nam"}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="f-mono text-sm font-semibold" style={{ color: T.green }}>{free} trống</div>
+                        <div className="f-mono text-[10px]" style={{ color: T.inkSoft }}>{occ}/{cap} đang ở</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="mt-4">
+              <Btn variant="outline" onClick={() => setViewBuildingFree(null)}>Đóng</Btn>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
