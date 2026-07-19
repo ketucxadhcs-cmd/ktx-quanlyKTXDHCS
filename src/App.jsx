@@ -3769,21 +3769,32 @@ function UtilitiesTab({ perm, user }) {
     })
     .sort((a, b) => {
       const ra = rooms.find((x) => x.id === a.roomId), rb = rooms.find((x) => x.id === b.roomId);
-      if (filterMonth) {
-        return naturalCompare(ra?.building || "", rb?.building || "") || naturalCompare(ra?.area || "", rb?.area || "") || naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || ""));
-      }
-      // Không lọc theo 1 tháng cụ thể: nhóm theo tháng trước (mới nhất lên đầu), rồi trong cùng 1 tháng thì
-      // sắp theo Toà nhà -> Tầng -> Số phòng — tránh tình trạng các phòng của các toà xen kẽ lộn xộn.
+      // Luôn sắp theo Toà nhà -> Tầng -> Số phòng trước tiên, để khi hiển thị nhóm theo toà thì phòng trong
+      // từng toà đi từ nhỏ đến lớn; trong cùng 1 phòng thì bản ghi mới nhất (tháng gần đây) lên trên.
       return (
-        String(b.month).localeCompare(String(a.month)) ||
         naturalCompare(ra?.building || "", rb?.building || "") ||
         naturalCompare(ra?.area || "", rb?.area || "") ||
-        naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || ""))
+        naturalCompare(String(ra?.roomNumber || ""), String(rb?.roomNumber || "")) ||
+        String(b.month).localeCompare(String(a.month))
       );
     });
 
   // Phòng nào CHƯA có chỉ số của tháng đang lọc — quan trọng khi số phòng lên tới hàng trăm/nghìn, để
   // biết còn thiếu dữ liệu ở đâu mà nhắc nhở, thay vì phải dò thủ công qua từng phòng.
+  // Nhóm bảng nhật ký (khi không lọc theo 1 tháng cụ thể) theo Toà nhà — mỗi toà 1 khối riêng, dễ quan sát
+  // khi số phòng lên tới hàng trăm/nghìn, thay vì 1 bảng dài lẫn lộn giữa các toà.
+  const logGroups = {};
+  filtered.forEach((r) => {
+    const room = rooms.find((x) => x.id === r.roomId);
+    const b = room?.building || "Chưa rõ toà nhà";
+    (logGroups[b] = logGroups[b] || []).push(r);
+  });
+  const logBuildingKeys = Object.keys(logGroups).sort((a, b) => {
+    if (a === "Chưa rõ toà nhà") return 1;
+    if (b === "Chưa rõ toà nhà") return -1;
+    return naturalCompare(a, b);
+  });
+
   const missingRooms = filterMonth
     ? roomsSorted.filter((r) => !records.some((rec) => String(rec.roomId) === String(r.id) && rec.month === filterMonth))
     : [];
@@ -4016,89 +4027,90 @@ function UtilitiesTab({ perm, user }) {
         </div>
         )
       ) : filtered.length === 0 ? <EmptyState text="Chưa có dữ liệu điện - nước phù hợp." /> : (
-        <>
-        <div className="f-body text-xs mb-2" style={{ color: T.inkSoft }}>
-          Hiện {paged.length} / {filtered.length} bản ghi phù hợp{filtered.length > PAGE_SIZE ? ` — trang ${pageClamped}/${totalPages}` : ""}.
+        <div className="space-y-4">
+        <div className="f-body text-xs" style={{ color: T.inkSoft }}>
+          Hiện {filtered.length} bản ghi phù hợp, chia theo {logBuildingKeys.length} toà nhà.
         </div>
-        <div className="overflow-x-auto stamp-border card-sheet" style={{ background: "#fff" }}>
-          <table className="w-full text-sm f-body table-lines">
-            <thead>
-              <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.green, color: T.paper }}>
-                <th className="text-left px-3 py-2">Phòng</th>
-                <th className="text-left px-3 py-2">Tháng</th>
-                <th className="text-left px-3 py-2">Chỉ số điện</th>
-                <th className="text-left px-3 py-2">Điện tiêu thụ</th>
-                <th className="text-left px-3 py-2">Chỉ số nước</th>
-                <th className="text-left px-3 py-2">Nước tiêu thụ</th>
-                <th className="px-3 py-2 w-20"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map((r, i) => {
-                const room = rooms.find((x) => x.id === r.roomId);
-                if (editingId === r.id) {
-                  return (
-                    <tr key={r.id}><td colSpan={7} className="p-2">
-                      <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
-                        <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
-                        <Field label="Phòng">
-                          <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
-                            {roomGroups.map((g) => (
-                              <optgroup key={g.building} label={`Toà ${g.building}`}>
-                                {g.rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
-                              </optgroup>
-                            ))}
-                            {roomsNoBuilding.length > 0 && (
-                              <optgroup label="Chưa rõ toà nhà">
-                                {roomsNoBuilding.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
-                              </optgroup>
-                            )}
-                          </select>
-                        </Field>
-                        <Field label="Tháng">
-                          <input type="month" className={inputCls} style={inputStyle} value={editForm.month} onChange={(e) => setEditForm({ ...editForm, month: e.target.value })} />
-                        </Field>
-                        <Field label="Chỉ số điện (kWh)">
-                          <input type="number" className={inputCls} style={inputStyle} value={editForm.electricityIndex} onChange={(e) => setEditForm({ ...editForm, electricityIndex: e.target.value })} />
-                        </Field>
-                        <Field label="Chỉ số nước (m³)">
-                          <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
-                        </Field>
-                        <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
-                      </div>
-                    </td></tr>
-                  );
-                }
-                return (
-                  <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
-                    <td className="px-3 py-2 f-mono">{room ? roomLabel(room) : "Phòng đã xoá"}</td>
-                    <td className="px-3 py-2 f-mono">{formatMonth(r.month)}</td>
-                    <td className="px-3 py-2 f-mono">{r.electricityIndex}</td>
-                    <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
-                    <td className="px-3 py-2 f-mono">{r.waterIndex}</td>
-                    <td className="px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
-                    <td className="px-3 py-2 text-right">
-                      {perm.canMaintain && (
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
-                          <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-3 mt-3">
-            <Btn size="sm" variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={pageClamped <= 1}>Trước</Btn>
-            <span className="f-mono text-xs" style={{ color: T.inkSoft }}>Trang {pageClamped} / {totalPages}</span>
-            <Btn size="sm" variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={pageClamped >= totalPages}>Sau</Btn>
+        {editingId && (
+          <div className="stamp-border p-3 grid grid-cols-1 md:grid-cols-2 gap-2" style={{ background: T.paper }}>
+            <div className="md:col-span-2"><FormWarning message={editWarn} /></div>
+            <Field label="Phòng">
+              <select className={inputCls} style={inputStyle} value={editForm.roomId} onChange={(e) => setEditForm({ ...editForm, roomId: e.target.value })}>
+                {roomGroups.map((g) => (
+                  <optgroup key={g.building} label={`Toà ${g.building}`}>
+                    {g.rooms.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                  </optgroup>
+                ))}
+                {roomsNoBuilding.length > 0 && (
+                  <optgroup label="Chưa rõ toà nhà">
+                    {roomsNoBuilding.map((rm) => <option key={rm.id} value={rm.id}>{roomLabel(rm)}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+            <Field label="Tháng">
+              <input type="month" className={inputCls} style={inputStyle} value={editForm.month} onChange={(e) => setEditForm({ ...editForm, month: e.target.value })} />
+            </Field>
+            <Field label="Chỉ số điện (kWh)">
+              <input type="number" className={inputCls} style={inputStyle} value={editForm.electricityIndex} onChange={(e) => setEditForm({ ...editForm, electricityIndex: e.target.value })} />
+            </Field>
+            <Field label="Chỉ số nước (m³)">
+              <input type="number" className={inputCls} style={inputStyle} value={editForm.waterIndex} onChange={(e) => setEditForm({ ...editForm, waterIndex: e.target.value })} />
+            </Field>
+            <div className="md:col-span-2 flex gap-2"><Btn onClick={saveEdit}>Lưu</Btn><Btn variant="outline" onClick={cancelEdit}>Huỷ</Btn></div>
           </div>
         )}
-        </>
+        {logBuildingKeys.map((building) => {
+          const list = logGroups[building];
+          return (
+            <div key={building} className="stamp-border" style={{ background: "rgba(255,255,255,0.55)" }}>
+              <div className="flex items-center gap-2 px-3 py-2 flex-wrap" style={{ background: T.green, borderBottom: `2px solid ${T.gold}` }}>
+                <Building2 size={14} style={{ color: T.amber }} />
+                <span className="f-display text-sm uppercase tracking-wider" style={{ color: T.paper }}>{building}</span>
+                <span className="f-mono text-[10px]" style={{ color: "rgba(237,230,214,0.7)" }}>({list.length} bản ghi)</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm f-body table-lines table-grid" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+                  <thead>
+                    <tr className="f-mono text-[11px] uppercase tracking-wider" style={{ background: T.greenDark || T.green, color: T.paper }}>
+                      <th className="text-center px-3 py-2">Phòng</th>
+                      <th className="text-center px-3 py-2">Tháng</th>
+                      <th className="text-center px-3 py-2">Chỉ số điện</th>
+                      <th className="text-center px-3 py-2">Điện tiêu thụ</th>
+                      <th className="text-center px-3 py-2">Chỉ số nước</th>
+                      <th className="text-center px-3 py-2">Nước tiêu thụ</th>
+                      <th className="px-3 py-2 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((r, i) => {
+                      const room = rooms.find((x) => x.id === r.roomId);
+                      return (
+                        <tr key={r.id} style={{ background: i % 2 ? T.paper : "#fff" }}>
+                          <td className="text-center px-3 py-2 f-mono font-medium" style={{ color: T.green }}>{room ? `Phòng ${room.roomNumber}${room.area ? ` · ${room.area}` : ""}` : "Phòng đã xoá"}</td>
+                          <td className="text-center px-3 py-2 f-mono">{formatMonth(r.month)}</td>
+                          <td className="text-center px-3 py-2 f-mono">{r.electricityIndex}</td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.elecUsage === null ? "—" : r.elecUsage}</td>
+                          <td className="text-center px-3 py-2 f-mono">{r.waterIndex}</td>
+                          <td className="text-center px-3 py-2 f-mono" style={{ color: T.amberDark }}>{r.waterUsage === null ? "—" : r.waterUsage}</td>
+                          <td className="px-3 py-2 text-center">
+                            {perm.canMaintain && (
+                              <div className="flex items-center justify-center gap-2">
+                                <button onClick={() => startEdit(r)} title="Sửa"><Pencil size={13} style={{ color: T.green }} /></button>
+                                <button onClick={() => remove(r.id)} title="Xoá"><Trash2 size={13} style={{ color: T.red }} /></button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+        </div>
       )}
     </div>
   );
