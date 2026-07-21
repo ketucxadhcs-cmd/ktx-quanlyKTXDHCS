@@ -2654,6 +2654,19 @@ function RoomsTab({ perm }) {
                               <div className="f-body text-xs mt-2" style={{ color: T.ink }}>
                                 Sĩ số: <b>{occ.length}</b> / {cap || "—"} chỗ
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedId((id) => (id === r.id ? null : r.id))}
+                                className="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm f-display text-[11px] uppercase tracking-wide btn-press"
+                                style={{
+                                  background: expandedId === r.id ? T.green : "rgba(31,85,115,0.08)",
+                                  color: expandedId === r.id ? "#fff" : T.green,
+                                  border: `1px solid ${T.green}`,
+                                }}
+                              >
+                                {expandedId === r.id ? <EyeOff size={13} /> : <Eye size={13} />}
+                                {expandedId === r.id ? "Ẩn chi tiết" : "Xem chi tiết phòng"}
+                              </button>
                               {r.note && <div className="f-body text-[11px] italic mt-1" style={{ color: T.inkSoft }}>{r.note}</div>}
                               {r.status === "Đang bảo trì" && r.maintenanceReason && (
                                 <div className="f-body text-[11px] mt-1" style={{ color: T.red }}>
