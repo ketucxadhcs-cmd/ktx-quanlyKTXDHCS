@@ -418,6 +418,12 @@ function useAuthConfig() {
     adminRecoveryCode: ADMIN_RECOVERY_CODE_DEFAULT,
     otpCode: "",
     otpExpiresAt: 0,
+    // Yêu cầu xin OTP của Cán bộ quản lý — cần Quản trị viên duyệt mới được gửi mã.
+    staffOtpRequestStatus: "none", // "none" | "pending" | "approved" | "denied"
+    staffOtpRequestedAt: 0,
+    staffOtpRequestedBy: "",
+    staffOtpCode: "",
+    staffOtpExpiresAt: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -437,6 +443,11 @@ function useAuthConfig() {
               adminRecoveryCode: parsed.adminRecoveryCode || ADMIN_RECOVERY_CODE_DEFAULT,
               otpCode: parsed.otpCode || "",
               otpExpiresAt: parsed.otpExpiresAt || 0,
+              staffOtpRequestStatus: parsed.staffOtpRequestStatus || "none",
+              staffOtpRequestedAt: parsed.staffOtpRequestedAt || 0,
+              staffOtpRequestedBy: parsed.staffOtpRequestedBy || "",
+              staffOtpCode: parsed.staffOtpCode || "",
+              staffOtpExpiresAt: parsed.staffOtpExpiresAt || 0,
             });
           } catch (e) {
             // giữ mặc định nếu dữ liệu lỗi
@@ -757,12 +768,38 @@ function ForgotStaffPanel({ config, setConfig, onBack, onDone }) {
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // ===== Xin OTP (cần Quản trị viên duyệt) khi không nhớ Mã khôi phục =====
+  const [showOtpRequest, setShowOtpRequest] = useState(false);
+  const [requesterName, setRequesterName] = useState("");
+  const [otpRequestSending, setOtpRequestSending] = useState(false);
+
+  const otpStillValid = config.staffOtpCode && Date.now() < (config.staffOtpExpiresAt || 0);
+
+  const requestOtp = async () => {
+    setErr("");
+    setOtpRequestSending(true);
+    const ok = await setConfig({
+      ...config,
+      staffOtpRequestStatus: "pending",
+      staffOtpRequestedAt: Date.now(),
+      staffOtpRequestedBy: requesterName.trim(),
+      staffOtpCode: "",
+      staffOtpExpiresAt: 0,
+    });
+    setOtpRequestSending(false);
+    if (!ok) { setErr("Gửi yêu cầu thất bại, thử lại nhé."); return; }
+    setShowOtpRequest(false);
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setErr(""); setMsg("");
-    if (!code.trim()) { setErr("Vui lòng nhập Mã khôi phục dành cho Cán bộ quản lý."); return; }
-    if (code.trim() !== config.staffRecoveryCode) {
-      setErr("Mã khôi phục không đúng. Nếu bạn không có mã này, hãy liên hệ Quản trị viên để được cấp lại.");
+    if (!code.trim()) { setErr("Vui lòng nhập Mã khôi phục dành cho Cán bộ quản lý hoặc mã OTP đã được Quản trị duyệt."); return; }
+    const codeTrim = code.trim();
+    const matchesRecoveryCode = codeTrim === config.staffRecoveryCode;
+    const matchesOtp = config.staffOtpCode && codeTrim === config.staffOtpCode && Date.now() < (config.staffOtpExpiresAt || 0);
+    if (!matchesRecoveryCode && !matchesOtp) {
+      setErr("Mã không đúng, hoặc mã OTP đã hết hạn. Nếu bạn không có Mã khôi phục, hãy gửi yêu cầu xin mã OTP bên dưới.");
       return;
     }
     if (!resetUnit && !resetManager) { setErr("Chọn ít nhất 1 mật khẩu muốn đặt lại."); return; }
@@ -773,6 +810,10 @@ function ForgotStaffPanel({ config, setConfig, onBack, onDone }) {
       ...config,
       unitPassword: resetUnit ? newUnitPw.trim() : config.unitPassword,
       managerPassword: resetManager ? newManagerPw.trim() : config.managerPassword,
+      // Dùng OTP xong thì huỷ ngay, tránh dùng lại; đồng thời đóng luôn yêu cầu đang chờ (nếu có).
+      staffOtpCode: matchesOtp ? "" : config.staffOtpCode,
+      staffOtpExpiresAt: matchesOtp ? 0 : config.staffOtpExpiresAt,
+      staffOtpRequestStatus: matchesOtp ? "none" : config.staffOtpRequestStatus,
     });
     setSaving(false);
     if (!ok) { setErr("Lưu thất bại, thử lại nhé."); return; }
@@ -786,9 +827,71 @@ function ForgotStaffPanel({ config, setConfig, onBack, onDone }) {
         Nhập <b>Mã khôi phục dành cho Cán bộ quản lý</b> (do Quản trị viên cấp riêng). Mã này chỉ đặt lại được mật khẩu
         Học viên và/hoặc Quản lý ký túc xá — không đụng được mật khẩu Quản trị.
       </p>
-      <Field label="Mã khôi phục (Cán bộ quản lý)" required>
-        <PasswordInput value={code} onChange={(e) => setCode(e.target.value)} placeholder="Nhập mã khôi phục" />
+      <Field label="Mã khôi phục (Cán bộ quản lý) hoặc mã OTP" required>
+        <PasswordInput value={code} onChange={(e) => setCode(e.target.value)} placeholder="Nhập mã khôi phục hoặc mã OTP 6 số" />
       </Field>
+
+      {/* ===== Khu vực xin OTP cần Quản trị duyệt ===== */}
+      {config.staffOtpRequestStatus === "pending" ? (
+        <div className="f-body text-[11px] mb-3 px-3 py-2" style={{ color: T.amberDark, background: "#FBF1DD", borderLeft: `3px solid ${T.amberDark}` }}>
+          Đã gửi yêu cầu xin mã OTP lúc {new Date(config.staffOtpRequestedAt).toLocaleTimeString("vi-VN")} — đang chờ <b>Quản trị viên</b> duyệt.
+          Trang này sẽ tự cập nhật khi Quản trị duyệt xong, không cần tải lại.
+        </div>
+      ) : otpStillValid ? (
+        <div className="f-body text-[11px] mb-3 px-3 py-2" style={{ color: T.green, background: "#E5F0E7", borderLeft: `3px solid ${T.green}` }}>
+          Quản trị viên đã duyệt yêu cầu. Vui lòng liên hệ trực tiếp Quản trị viên để nhận mã OTP, sau đó nhập mã đó vào ô phía trên
+          (có hiệu lực đến {new Date(config.staffOtpExpiresAt).toLocaleTimeString("vi-VN")}).
+        </div>
+      ) : config.staffOtpRequestStatus === "denied" ? (
+        <div className="f-body text-[11px] mb-3 px-3 py-2" style={{ color: T.red, background: "#F7E3E6", borderLeft: `3px solid ${T.red}` }}>
+          Yêu cầu xin mã OTP của bạn đã bị Quản trị viên từ chối. Vui lòng liên hệ trực tiếp Quản trị viên để được hỗ trợ,
+          hoặc gửi lại yêu cầu khác bên dưới.
+        </div>
+      ) : null}
+
+      {config.staffOtpRequestStatus !== "pending" && !otpStillValid && (
+        showOtpRequest ? (
+          <div className="mb-3 px-3 py-3" style={{ border: `1px solid ${T.paperDark}`, background: T.paper }}>
+            <Field label="Họ tên của bạn (để Quản trị viên biết ai yêu cầu)">
+              <input
+                className={inputCls}
+                style={inputStyle}
+                value={requesterName}
+                onChange={(e) => setRequesterName(e.target.value)}
+                placeholder="Ví dụ: Nguyễn Văn A"
+              />
+            </Field>
+            <div className="flex gap-2 mt-1">
+              <button
+                type="button"
+                onClick={requestOtp}
+                disabled={otpRequestSending}
+                className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press"
+                style={{ background: T.amberDark, color: "#fff" }}
+              >
+                {otpRequestSending ? "Đang gửi…" : "Gửi yêu cầu"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOtpRequest(false)}
+                className="f-body text-[11px] underline px-2"
+                style={{ color: T.inkSoft }}
+              >
+                Huỷ
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowOtpRequest(true)}
+            className="f-body text-xs underline mb-3"
+            style={{ color: T.amberDark }}
+          >
+            Không nhớ mã khôi phục? Gửi yêu cầu xin mã OTP (cần Quản trị viên duyệt)
+          </button>
+        )
+      )}
 
       <div className="mb-3">
         <label className="flex items-center gap-2 f-body text-xs mb-2" style={{ color: T.ink }}>
@@ -5512,6 +5615,43 @@ function NotificationsTab({ perm, user }) {
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
 
+  // ===== Duyệt yêu cầu xin OTP của Cán bộ quản lý (chỉ Quản trị viên thấy được) =====
+  const { config: authCfg, setConfig: setAuthCfg } = useAuthConfig();
+  const [otpActionBusy, setOtpActionBusy] = useState(false);
+  const [otpActionMsg, setOtpActionMsg] = useState("");
+  const staffOtpStillValid = authCfg.staffOtpCode && Date.now() < (authCfg.staffOtpExpiresAt || 0);
+
+  const approveStaffOtp = async () => {
+    setOtpActionBusy(true);
+    setOtpActionMsg("");
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = Date.now() + OTP_TTL_MS;
+    const saved = await setAuthCfg({ ...authCfg, staffOtpCode: otp, staffOtpExpiresAt: expiresAt, staffOtpRequestStatus: "approved" });
+    if (saved) {
+      try {
+        await sendRecoveryOtpEmail(otp);
+        setOtpActionMsg(`Đã duyệt — mã OTP: ${otp} (đã gửi tới ${ADMIN_RECOVERY_EMAIL}, hiệu lực ${OTP_TTL_MS / 60000} phút). Hãy báo mã này cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
+      } catch (e) {
+        const reason = e?.text || e?.message || (typeof e === "string" ? e : JSON.stringify(e));
+        setOtpActionMsg(`Đã duyệt — mã OTP: ${otp} (hiệu lực ${OTP_TTL_MS / 60000} phút), nhưng gửi email thất bại — ${reason}. Bạn vẫn có thể đọc mã ở đây và báo trực tiếp cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
+      }
+    } else {
+      setOtpActionMsg("Duyệt thất bại, thử lại nhé.");
+    }
+    setOtpActionBusy(false);
+  };
+  const denyStaffOtp = async () => {
+    setOtpActionBusy(true);
+    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "denied" });
+    setOtpActionBusy(false);
+  };
+  const dismissStaffOtp = async () => {
+    setOtpActionBusy(true);
+    setOtpActionMsg("");
+    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "none" });
+    setOtpActionBusy(false);
+  };
+
   const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
   const areas = [...new Set(rooms.map((r) => r.area).filter(Boolean))];
   const khoaList = [...new Set(students.map((s) => s.khoa).filter(Boolean))];
@@ -5580,6 +5720,43 @@ function NotificationsTab({ perm, user }) {
 
   return (
     <div>
+      {perm.isAdmin && (authCfg.staffOtpRequestStatus === "pending" || staffOtpStillValid) && (
+        <div className="stamp-border p-4 mb-5" style={{ background: "#FBF1DD", borderColor: T.amberDark }}>
+          {authCfg.staffOtpRequestStatus === "pending" ? (
+            <>
+              <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.amberDark }}>Yêu cầu xin mã OTP — Cán bộ quản lý</div>
+              <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
+                <b>{authCfg.staffOtpRequestedBy || "Một cán bộ quản lý"}</b> đang xin cấp mã OTP để đặt lại mật khẩu, lúc{" "}
+                {authCfg.staffOtpRequestedAt ? new Date(authCfg.staffOtpRequestedAt).toLocaleString("vi-VN") : "—"}.
+                Duyệt sẽ tạo mã OTP mới và gửi tới Gmail Quản trị ({ADMIN_RECOVERY_EMAIL}) để bạn báo lại cho Cán bộ.
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={approveStaffOtp} disabled={otpActionBusy}
+                  className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.green, color: "#fff" }}>
+                  {otpActionBusy ? "Đang xử lý…" : "Duyệt & Gửi OTP"}
+                </button>
+                <button type="button" onClick={denyStaffOtp} disabled={otpActionBusy}
+                  className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.red, color: "#fff" }}>
+                  Từ chối
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.green }}>Đã duyệt — Mã OTP đang có hiệu lực</div>
+              <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
+                Cấp cho <b>{authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}</b> — hiệu lực đến {new Date(authCfg.staffOtpExpiresAt).toLocaleTimeString("vi-VN")}.
+              </p>
+              <button type="button" onClick={dismissStaffOtp} disabled={otpActionBusy}
+                className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.ink, color: "#fff" }}>
+                Đóng thông báo này
+              </button>
+            </>
+          )}
+          {otpActionMsg && <div className="f-body text-[11px] mt-3" style={{ color: T.ink }}>{otpActionMsg}</div>}
+        </div>
+      )}
+
       <SectionHeader compact icon={Bell} eyebrow={`Tổng số thông báo: ${notifications.length}`} title="Thông báo"
         action={perm.canManage && (
           <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi thông báo</Btn>
