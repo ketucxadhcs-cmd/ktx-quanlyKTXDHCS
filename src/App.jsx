@@ -5615,43 +5615,6 @@ function NotificationsTab({ perm, user }) {
   const [form, setForm] = useState(blank);
   const [warn, setWarn] = useState("");
 
-  // ===== Duyệt yêu cầu xin OTP của Cán bộ quản lý (chỉ Quản trị viên thấy được) =====
-  const { config: authCfg, setConfig: setAuthCfg } = useAuthConfig();
-  const [otpActionBusy, setOtpActionBusy] = useState(false);
-  const [otpActionMsg, setOtpActionMsg] = useState("");
-  const staffOtpStillValid = authCfg.staffOtpCode && Date.now() < (authCfg.staffOtpExpiresAt || 0);
-
-  const approveStaffOtp = async () => {
-    setOtpActionBusy(true);
-    setOtpActionMsg("");
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = Date.now() + OTP_TTL_MS;
-    const saved = await setAuthCfg({ ...authCfg, staffOtpCode: otp, staffOtpExpiresAt: expiresAt, staffOtpRequestStatus: "approved" });
-    if (saved) {
-      try {
-        await sendRecoveryOtpEmail(otp);
-        setOtpActionMsg(`Đã duyệt — mã OTP: ${otp} (đã gửi tới ${ADMIN_RECOVERY_EMAIL}, hiệu lực ${OTP_TTL_MS / 60000} phút). Hãy báo mã này cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
-      } catch (e) {
-        const reason = e?.text || e?.message || (typeof e === "string" ? e : JSON.stringify(e));
-        setOtpActionMsg(`Đã duyệt — mã OTP: ${otp} (hiệu lực ${OTP_TTL_MS / 60000} phút), nhưng gửi email thất bại — ${reason}. Bạn vẫn có thể đọc mã ở đây và báo trực tiếp cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
-      }
-    } else {
-      setOtpActionMsg("Duyệt thất bại, thử lại nhé.");
-    }
-    setOtpActionBusy(false);
-  };
-  const denyStaffOtp = async () => {
-    setOtpActionBusy(true);
-    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "denied" });
-    setOtpActionBusy(false);
-  };
-  const dismissStaffOtp = async () => {
-    setOtpActionBusy(true);
-    setOtpActionMsg("");
-    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "none" });
-    setOtpActionBusy(false);
-  };
-
   const buildings = [...new Set(rooms.map((r) => r.building).filter(Boolean))];
   const areas = [...new Set(rooms.map((r) => r.area).filter(Boolean))];
   const khoaList = [...new Set(students.map((s) => s.khoa).filter(Boolean))];
@@ -5720,43 +5683,6 @@ function NotificationsTab({ perm, user }) {
 
   return (
     <div>
-      {perm.isAdmin && (authCfg.staffOtpRequestStatus === "pending" || staffOtpStillValid) && (
-        <div className="stamp-border p-4 mb-5" style={{ background: "#FBF1DD", borderColor: T.amberDark }}>
-          {authCfg.staffOtpRequestStatus === "pending" ? (
-            <>
-              <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.amberDark }}>Yêu cầu xin mã OTP — Cán bộ quản lý</div>
-              <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
-                <b>{authCfg.staffOtpRequestedBy || "Một cán bộ quản lý"}</b> đang xin cấp mã OTP để đặt lại mật khẩu, lúc{" "}
-                {authCfg.staffOtpRequestedAt ? new Date(authCfg.staffOtpRequestedAt).toLocaleString("vi-VN") : "—"}.
-                Duyệt sẽ tạo mã OTP mới và gửi tới Gmail Quản trị ({ADMIN_RECOVERY_EMAIL}) để bạn báo lại cho Cán bộ.
-              </p>
-              <div className="flex gap-2">
-                <button type="button" onClick={approveStaffOtp} disabled={otpActionBusy}
-                  className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.green, color: "#fff" }}>
-                  {otpActionBusy ? "Đang xử lý…" : "Duyệt & Gửi OTP"}
-                </button>
-                <button type="button" onClick={denyStaffOtp} disabled={otpActionBusy}
-                  className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.red, color: "#fff" }}>
-                  Từ chối
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.green }}>Đã duyệt — Mã OTP đang có hiệu lực</div>
-              <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
-                Cấp cho <b>{authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}</b> — hiệu lực đến {new Date(authCfg.staffOtpExpiresAt).toLocaleTimeString("vi-VN")}.
-              </p>
-              <button type="button" onClick={dismissStaffOtp} disabled={otpActionBusy}
-                className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.ink, color: "#fff" }}>
-                Đóng thông báo này
-              </button>
-            </>
-          )}
-          {otpActionMsg && <div className="f-body text-[11px] mt-3" style={{ color: T.ink }}>{otpActionMsg}</div>}
-        </div>
-      )}
-
       <SectionHeader compact icon={Bell} eyebrow={`Tổng số thông báo: ${notifications.length}`} title="Thông báo"
         action={perm.canManage && (
           <Btn size="sm" onClick={() => (showForm ? setShowForm(false) : setShowForm(true))}><Plus size={14} /> Gửi thông báo</Btn>
@@ -6254,6 +6180,110 @@ const TAB_ROLES = {
   docs: ["admin", "can_bo", "sinh_vien"],
 };
 
+/* ============================================================
+   TAB: DUYỆT KHÔI PHỤC MẬT KHẨU (chỉ Quản trị viên)
+   Cán bộ quản lý gửi yêu cầu xin OTP ở màn hình đăng nhập → Quản trị vào đây để duyệt hoặc từ chối.
+   ============================================================ */
+function OtpApprovalTab({ perm }) {
+  const { config: authCfg, setConfig: setAuthCfg, loading } = useAuthConfig();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const status = authCfg.staffOtpRequestStatus || "none";
+  const stillValid = authCfg.staffOtpCode && Date.now() < (authCfg.staffOtpExpiresAt || 0);
+
+  const approve = async () => {
+    setBusy(true); setMsg("");
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = Date.now() + OTP_TTL_MS;
+    const saved = await setAuthCfg({ ...authCfg, staffOtpCode: otp, staffOtpExpiresAt: expiresAt, staffOtpRequestStatus: "approved" });
+    if (saved) {
+      try {
+        await sendRecoveryOtpEmail(otp);
+        setMsg(`Đã duyệt — mã OTP: ${otp} (đã gửi tới ${ADMIN_RECOVERY_EMAIL}, hiệu lực ${OTP_TTL_MS / 60000} phút). Hãy báo mã này cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
+      } catch (e) {
+        const reason = e?.text || e?.message || (typeof e === "string" ? e : JSON.stringify(e));
+        setMsg(`Đã duyệt — mã OTP: ${otp} (hiệu lực ${OTP_TTL_MS / 60000} phút), nhưng gửi email thất bại — ${reason}. Bạn vẫn có thể đọc mã ở đây và báo trực tiếp cho ${authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}.`);
+      }
+    } else {
+      setMsg("Duyệt thất bại, thử lại nhé.");
+    }
+    setBusy(false);
+  };
+  const deny = async () => {
+    setBusy(true); setMsg("");
+    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "denied" });
+    setBusy(false);
+  };
+  const dismiss = async () => {
+    setBusy(true); setMsg("");
+    await setAuthCfg({ ...authCfg, staffOtpRequestStatus: "none" });
+    setBusy(false);
+  };
+
+  if (!perm.isAdmin) return null;
+
+  return (
+    <div>
+      <SectionHeader compact icon={KeyRound} eyebrow="Bảo mật" title="Duyệt khôi phục mật khẩu" />
+      <p className="f-body text-xs mb-4" style={{ color: T.inkSoft }}>
+        Khi Cán bộ quản lý ký túc xá quên Mã khôi phục, họ có thể gửi yêu cầu xin mã OTP ở màn hình đăng nhập.
+        Yêu cầu đó sẽ hiện ở đây để bạn duyệt — chỉ khi bạn bấm "Duyệt" thì mã OTP mới được tạo và gửi qua email.
+      </p>
+
+      {loading ? (
+        <div className="f-body text-xs" style={{ color: T.inkSoft }}>Đang tải…</div>
+      ) : status === "pending" ? (
+        <div className="stamp-border p-4" style={{ background: "#FBF1DD", borderColor: T.amberDark }}>
+          <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.amberDark }}>Có yêu cầu đang chờ duyệt</div>
+          <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
+            <b>{authCfg.staffOtpRequestedBy || "Một cán bộ quản lý"}</b> đang xin cấp mã OTP để đặt lại mật khẩu, lúc{" "}
+            {authCfg.staffOtpRequestedAt ? new Date(authCfg.staffOtpRequestedAt).toLocaleString("vi-VN") : "—"}.
+            Duyệt sẽ tạo mã OTP mới và gửi tới Gmail Quản trị ({ADMIN_RECOVERY_EMAIL}) để bạn báo lại cho Cán bộ.
+          </p>
+          <div className="flex gap-2">
+            <button type="button" onClick={approve} disabled={busy}
+              className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.green, color: "#fff" }}>
+              {busy ? "Đang xử lý…" : "Duyệt & Gửi OTP"}
+            </button>
+            <button type="button" onClick={deny} disabled={busy}
+              className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.red, color: "#fff" }}>
+              Từ chối
+            </button>
+          </div>
+        </div>
+      ) : stillValid ? (
+        <div className="stamp-border p-4" style={{ background: "#E5F0E7", borderColor: T.green }}>
+          <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.green }}>Đã duyệt — Mã OTP đang có hiệu lực</div>
+          <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
+            Cấp cho <b>{authCfg.staffOtpRequestedBy || "Cán bộ quản lý"}</b> — hiệu lực đến {new Date(authCfg.staffOtpExpiresAt).toLocaleTimeString("vi-VN")}.
+          </p>
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.ink, color: "#fff" }}>
+            Đóng thông báo này
+          </button>
+        </div>
+      ) : status === "denied" ? (
+        <div className="stamp-border p-4" style={{ background: "#F7E3E6", borderColor: T.red }}>
+          <div className="f-display text-sm uppercase tracking-wide mb-1" style={{ color: T.red }}>Yêu cầu đã bị từ chối</div>
+          <p className="f-body text-xs mb-3" style={{ color: T.ink }}>
+            Cán bộ quản lý sẽ thấy thông báo này ở màn hình đăng nhập. Nếu họ gửi yêu cầu mới, mục này sẽ hiện lại.
+          </p>
+          <button type="button" onClick={dismiss} disabled={busy}
+            className="f-display text-[11px] uppercase tracking-wide px-3 py-2 btn-press" style={{ background: T.ink, color: "#fff" }}>
+            Đóng thông báo này
+          </button>
+        </div>
+      ) : (
+        <div className="f-body text-xs px-3 py-3" style={{ color: T.inkSoft, border: `1px dashed ${T.paperDark}` }}>
+          Hiện chưa có yêu cầu xin mã OTP nào đang chờ duyệt.
+        </div>
+      )}
+      {msg && <div className="f-body text-[11px] mt-3" style={{ color: T.ink }}>{msg}</div>}
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loginRole, setLoginRole] = useState(null);
@@ -6264,13 +6294,16 @@ export default function App() {
   const [managerForm, setManagerForm] = useState({ name: "", phone: "" });
 
   const { perm, permissions, setPermissions, permLoading } = useRole(user, loginRole);
+  const { config: authCfg } = useAuthConfig();
+  const hasPendingOtpRequest = authCfg.staffOtpRequestStatus === "pending";
 
   // Phòng trường hợp đang đứng ở một mục mà vai trò hiện tại không còn quyền xem (VD: quản trị vừa
   // đổi quyền của mình, hoặc Học viên lỡ đứng ở mục không dành cho mình), tự động đưa về Tổng quan.
   // Đặt TRƯỚC "if (!user) return" để không vi phạm Rules of Hooks (số lượng hook phải giống nhau mỗi lần render).
   useEffect(() => {
     if (!user) return;
-    const allowed = tab === "reports" ? perm.canManage
+    const allowed = tab === "otpapproval" ? perm.isAdmin
+      : tab === "reports" ? perm.canManage
       : tab === "password" ? perm.canManage
       : tab === "permissions" ? perm.canManage
       : (TAB_ROLES[tab] || []).includes(perm.role);
@@ -6290,7 +6323,9 @@ export default function App() {
 
   const renderTab = () => {
     const isReportsOrAdminTab = tab === "reports" || tab === "password" || tab === "permissions";
-    const allowedForTab = isReportsOrAdminTab
+    const allowedForTab = tab === "otpapproval"
+      ? perm.isAdmin
+      : isReportsOrAdminTab
       ? perm.canManage
       : (TAB_ROLES[tab] || []).includes(perm.role);
     if (!allowedForTab) return <DashboardTab perm={perm} onNavigate={goToTab} />;
@@ -6309,6 +6344,7 @@ export default function App() {
       case "docs": return <DocsTab user={user} perm={perm} />;
       case "permissions": return <PermissionsTab permissions={permissions} setPermissions={setPermissions} permLoading={permLoading} />;
       case "password": return <PasswordTab user={user} perm={perm} />;
+      case "otpapproval": return <OtpApprovalTab perm={perm} />;
       default: return null;
     }
   };
@@ -6317,6 +6353,7 @@ export default function App() {
     ...TABS.filter((t) => (TAB_ROLES[t.id] || []).includes(perm.role)),
     ...(perm.canManage ? [{ id: "reports", label: "Báo cáo - Thống kê", icon: ClipboardCheck }] : []),
     ...(perm.canManage ? [{ id: "password", label: "Đổi mật khẩu", icon: KeyRound }] : []),
+    ...(perm.isAdmin ? [{ id: "otpapproval", label: "Duyệt khôi phục MK", icon: KeyRound, badge: hasPendingOtpRequest }] : []),
     ...(perm.canManage ? [{ id: "permissions", label: "Phân quyền", icon: Shield }] : []),
   ];
   const roleIcon = { admin: Star, can_bo: Shield, ky_thuat: Wrench, sinh_vien: Users };
@@ -6443,10 +6480,16 @@ export default function App() {
                   }}
                 >
                   <span
-                    className="icon-badge icon-badge-sm"
+                    className="icon-badge icon-badge-sm relative"
                     style={{ background: active ? "rgba(19,31,25,0.12)" : "rgba(255,255,255,0.08)" }}
                   >
                     <Icon size={12} />
+                    {t.badge && (
+                      <span
+                        className="absolute"
+                        style={{ top: -2, right: -2, width: 8, height: 8, borderRadius: "50%", background: T.red, border: `1.5px solid ${T.green}` }}
+                      />
+                    )}
                   </span>
                   <span className="flex-1 leading-tight">{t.label}</span>
                 </button>
